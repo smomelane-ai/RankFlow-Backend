@@ -4,127 +4,83 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RankFlow - Taxi Logistics Engine</title>
-    <!-- Tailwind CSS for UI Styling -->
-    <script src="https://tailwindcss.com"></script>
-    <!-- FontAwesome for Dashboard Icons -->
-    <link rel="stylesheet" href="https://cloudflare.com">
     <style>
-        @import url('https://googleapis.com');
-        body { font-family: 'Inter', sans-serif; }
+        body { font-family: sans-serif; background-color: #111827; color: #f3f4f6; padding: 20px; max-width: 600px; mx-auto; }
+        .card { background-color: #1f2937; border: 1px solid #374151; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        input, select { width: 100%; padding: 10px; margin: 8px 0; background-color: #0f172a; color: white; border: 1px solid #374151; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background-color: #f59e0b; color: #111827; border: none; font-weight: bold; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+        button:hover { background-color: #d97706; }
+        .success-box { padding: 10px; background-color: #064e3b; color: #34d399; border-radius: 4px; margin-top: 10px; display: none; text-align: center; }
+        .error-box { padding: 10px; background-color: #4c0519; color: #f43f5e; border-radius: 4px; margin-top: 10px; display: none; text-align: center; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col justify-between">
+<body>
 
-    <!-- 🚏 HEADER SECTION -->
-    <header class="bg-gray-800 border-b border-gray-700 p-4 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto flex justify-between items-center">
-            <div class="flex items-center space-x-3">
-                <i class="fa-solid fa-code-fork text-amber-500 text-2xl animate-pulse"></i>
-                <h1 class="text-xl font-bold tracking-tight text-white">RankFlow <span class="text-xs text-amber-400 font-normal px-2 py-0.5 bg-amber-950 border border-amber-800 rounded-full ml-2">Live Terminal</span></h1>
-            </div>
-            <div class="flex items-center space-x-4">
-                <div class="bg-gray-900 px-3 py-1.5 rounded-lg border border-gray-700 flex items-center space-x-2">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                    <span class="text-xs font-mono text-gray-400">Server Status: Connected</span>
-                </div>
-            </div>
-        </div>
-    </header>
+    <h1>RankFlow Live Terminal</h1>
+    <p style="color: #10b981;">● Server Status: Connected</p>
 
-    <!-- 📊 MAIN ENGINE DASHBOARD -->
-    <main class="max-w-4xl mx-auto p-4 w-full flex-grow space-y-6 mt-4">
+    <!-- 🔑 LOGIN SCREEN -->
+    <div id="authCard" class="card">
+        <h2>Driver Access Portal</h2>
+        <p style="color: #9ca3af; font-size: 14px;">Verify your system PIN to log in.</p>
         
-        <!-- 🔑 PIN AUTHENTICATION CARD -->
-        <div id="authCard" class="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-xl max-w-md mx-auto">
-            <h2 class="text-lg font-bold text-white mb-2 flex items-center"><i class="fa-solid fa-lock text-amber-500 mr-2"></i> Driver Access Portal</h2>
-            <p class="text-xs text-gray-400 mb-4">Verify your system PIN to log in and manage your rank position.</p>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-semibold text-gray-400 mb-1">Driver ID / License Number</label>
-                    <input type="text" id="driverIdInput" placeholder="e.g., DRV98765" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none font-mono">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-gray-400 mb-1">Security PIN Code</label>
-                    <input type="password" id="pinInput" placeholder="••••" maxlength="4" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-sm text-white tracking-widest text-center focus:border-amber-500 focus:outline-none font-mono text-lg">
-                </div>
-                <button onclick="handleVerifyPin()" class="w-full bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold py-2.5 px-4 rounded-lg text-sm transition duration-200">
-                    Verify Terminal access
-                </button>
-                <div id="authMessage" class="text-xs text-center mt-2 hidden"></div>
-            </div>
+        <label>Driver ID / License Number</label>
+        <input type="text" id="driverIdInput" placeholder="e.g., DRV001">
+        
+        <label>Security PIN Code</label>
+        <input type="password" id="pinInput" placeholder="••••" maxlength="4">
+        
+        <button onclick="handleVerifyPin()">Verify Terminal access</button>
+        <div id="authMessage" class="error-box"></div>
+    </div>
+
+    <!-- 🏎️ WORKSPACE (Hidden by default using standard display styles) -->
+    <div id="workspace" style="display: none;">
+        
+        <div class="card" style="background-color: #111827; text-align: center; border: 2px solid #f59e0b;">
+            <h3 style="color: #9ca3af; margin: 0;">Available Commuter Balance</h3>
+            <p style="font-size: 40px; font-weight: bold; margin: 10px 0; color: white;" id="walletDisplay">R 0.00</p>
+            <p style="color: #f59e0b; font-size: 12px; margin: 0;">Standard R 2.00 deduction applies upon dispatch.</p>
         </div>
 
-        <!-- 🏎️ WORKSPACE CONTENT (Hidden until authorized) -->
-        <div id="workspace" class="hidden space-y-6">
+        <div class="card">
+            <h3>Top-Up Smart Wallet</h3>
+            <input type="number" id="topupAmount" placeholder="Amount (R)">
+            <button onclick="handleTopup()" style="background-color: #4b5563; color: white;">Load Funds</button>
+            <div id="walletMessage" class="success-box"></div>
+        </div>
+
+        <div class="card">
+            <h2>Log Active Queue Dispatch</h2>
+            <label>Select Transit Route</label>
+            <select id="routeSelect">
+                <option value="Durban to Inanda">Durban to Inanda</option>
+                <option value="Umlazi to CBD">Umlazi to CBD</option>
+                <option value="Pinetown to KwaMashu">Pinetown to KwaMashu</option>
+            </select>
             
-            <!-- WALLET OVERVIEW & TOPUP -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="bg-gray-800 border border-gray-700 rounded-xl p-5 flex flex-col justify-between">
-                    <div>
-                        <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400">Available Commuter Balance</h3>
-                        <p class="text-4xl font-extrabold text-white mt-1" id="walletDisplay">R 0.00</p>
-                    </div>
-                    <p class="text-xs text-amber-400/80 mt-4"><i class="fa-solid fa-circle-info mr-1"></i> standard R 2.00 deduction applies upon dispatch logging.</p>
-                </div>
-
-                <div class="bg-gray-800 border border-gray-700 rounded-xl p-5 space-y-3">
-                    <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400">Top-Up Smart Wallet</h3>
-                    <div class="flex space-x-2">
-                        <input type="number" id="topupAmount" placeholder="Amount (R)" class="flex-grow bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-amber-500">
-                        <button onclick="handleTopup()" class="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-4 rounded-lg text-sm border border-gray-600 transition">
-                            Load Funds
-                        </button>
-                    </div>
-                    <div id="walletMessage" class="text-xs hidden"></div>
-                </div>
-            </div>
-
-            <!-- QUEUE DISPATCH ENGINE -->
-            <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-xl">
-                <h2 class="text-lg font-bold text-white mb-4 flex items-center"><i class="fa-solid fa-truck-ramp-box text-amber-500 mr-2"></i> Log Active Queue Dispatch</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-400 mb-1">Select Transit Route</label>
-                        <select id="routeSelect" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none">
-                            <option value="Durban to Inanda">Durban to Inanda</option>
-                            <option value="Umlazi to CBD">Umlazi to CBD</option>
-                            <option value="Pinetown to KwaMashu">Pinetown to KwaMashu</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-400 mb-1">Taxi Vehicle Fleet ID</label>
-                        <input type="text" id="taxiIdInput" placeholder="e.g., ND-887-231" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none font-mono">
-                    </div>
-                </div>
-                <button onclick="handleDispatch()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-sm mt-5 transition">
-                    Confirm Dispatch Logs (Deduct R2.00)
-                </button>
-                <div id="dispatchMessage" class="text-xs text-center mt-3 hidden"></div>
-            </div>
-
+            <label>Taxi Vehicle Fleet ID</label>
+            <input type="text" id="taxiIdInput" placeholder="e.g., ND-887-231">
+            
+            <button onclick="handleDispatch()" style="background-color: #059669; color: white;">Confirm Dispatch Logs</button>
+            <div id="dispatchMessage" class="success-box"></div>
         </div>
-    </main>
 
-    <!-- 📡 SYSTEM CORE LOGIC -->
+    </div>
+
     <script>
-        const BACKEND_URL = "https://rankflow-backend-zr18.onrender.com";
+        const BACKEND_URL = "https://onrender.com";
         let activeUserId = "";
 
-        // UI Feedback utility
-        function showMessage(elementId, text, isSuccess) {
-            const el = document.getElementById(elementId);
-            el.innerText = text;
-            el.className = `text-xs text-center mt-2 font-medium p-2 rounded-lg ${isSuccess ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-900' : 'bg-rose-950/50 text-rose-400 border border-rose-900'}`;
-            el.classList.remove('hidden');
-        }
-
-        // 🔑 1. PIN VERIFICATION
         async function handleVerifyPin() {
             const userId = document.getElementById('driverIdInput').value.trim();
             const pin = document.getElementById('pinInput').value.trim();
+            const msgEl = document.getElementById('authMessage');
+            msgEl.style.display = 'none';
 
             if (!userId || !pin) {
-                showMessage('authMessage', 'Please fill in both Driver ID and PIN', false);
+                msgEl.innerText = 'Please fill in both Driver ID and PIN';
+                msgEl.style.display = 'block';
                 return;
             }
 
@@ -138,24 +94,27 @@
 
                 if (result.success) {
                     activeUserId = userId;
-                    document.getElementById('authCard').classList.add('hidden');
-                    document.getElementById('workspace').classList.remove('hidden');
-                    // Fetch initial balance mock setup
-                    document.getElementById('walletDisplay').innerText = `R 0.00`;
+                    document.getElementById('authCard').style.display = 'none';
+                    document.getElementById('workspace').style.display = 'block';
+                    // Show the real database balance returned from your server
+                    document.getElementById('walletDisplay').innerText = `R ${parseFloat(result.balance).toFixed(2)}`;
                 } else {
-                    showMessage('authMessage', result.message || 'Invalid identification credentials', false);
+                    msgEl.innerText = result.message || 'Invalid identification credentials';
+                    msgEl.style.display = 'block';
                 }
             } catch (err) {
-                showMessage('authMessage', 'Failed to connect to Render server network.', false);
+                msgEl.innerText = 'Connecting to server... Please wait 30 seconds for Render to wake up and try again.';
+                msgEl.style.display = 'block';
             }
         }
 
-        // 💳 2. WALLET TOPUP
         async function handleTopup() {
             const amount = document.getElementById('topupAmount').value;
+            const msgEl = document.getElementById('walletMessage');
+            msgEl.style.display = 'none';
 
             if (!amount || amount <= 0) {
-                showMessage('walletMessage', 'Enter a valid amount to load', false);
+                alert('Enter a valid amount');
                 return;
             }
 
@@ -169,3 +128,43 @@
 
                 if (result.success) {
                     document.getElementById('walletDisplay').innerText = `R ${parseFloat(result.balance).toFixed(2)}`;
+                    msgEl.innerText = 'Funds successfully deposited into cloud ledger.';
+                    msgEl.style.display = 'block';
+                    document.getElementById('topupAmount').value = '';
+                }
+            } catch (err) {
+                alert('Network error during topup.');
+            }
+        }
+
+        async function handleDispatch() {
+            const route = document.getElementById('routeSelect').value;
+            const taxiId = document.getElementById('taxiIdInput').value.trim();
+            const msgEl = document.getElementById('dispatchMessage');
+            msgEl.style.display = 'none';
+
+            if (!taxiId) {
+                alert('Please provide a Fleet ID');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/queue/dispatch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ route, taxiId })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    msgEl.innerText = `Success! Fleet ${taxiId} dispatched on ${route}.`;
+                    msgEl.style.display = 'block';
+                    document.getElementById('taxiIdInput').value = '';
+                }
+            } catch (err) {
+                alert('Server synchronization error.');
+            }
+        }
+    </script>
+</body>
+</html>
