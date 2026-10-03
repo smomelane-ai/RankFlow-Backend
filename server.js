@@ -9,9 +9,10 @@ app.use(cors());
 app.use(express.json());
 
 // 🔐 CONNECT TO SUPABASE CLOUD (Paste your keys inside the single quotes below)
-const SUPABASE_URL = 'https://qmfjsdvsgvoixyhgqflg.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_DAWxXfh5fWbiQeEIExcCFw_78EN0oi5';
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
 
 // ----------------------------------------------------
 // 🚦 DISPATCH ENDPOINT (Saves & Updates to Supabase)
