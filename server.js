@@ -13,7 +13,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// 🚏 1. DISPATCH ENDPOINT (Saves & Updates to Supabase)
+// 🚏 1. DISPATCH ENDPOINT
 app.post('/api/queue/dispatch', async (req, res) => {
     const { route, taxiId } = req.body;
     const dispatchFee = 2.00;
@@ -35,19 +35,17 @@ app.post('/api/wallet/topup', async (req, res) => {
     const { userId, amount } = req.body;
 
     try {
-        // Fetch current balance
         const { data: wallet, error: fetchError } = await supabase
             .from('wallets')
             .select('balance')
             .eq('user_id', userId)
             .single();
 
-        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError; // PGRST116 means no row found
+        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
         const currentBalance = wallet ? wallet.balance : 0;
         const newBalance = currentBalance + parseFloat(amount);
 
-        // Update or Insert new balance
         const { data, error: saveError } = await supabase
             .from('wallets')
             .upsert({ user_id: userId, balance: newBalance, updated_at: new Date() }, { onConflict: 'user_id' });
@@ -59,7 +57,7 @@ app.post('/api/wallet/topup', async (req, res) => {
     }
 });
 
-// 🔑 3. PIN VERIFICATION ENDPOINT
+// 🔑 3. PIN VERIFICATION ENDPOINT (Now returns the real database balance!)
 app.post('/api/auth/verify-pin', async (req, res) => {
     const { userId, pin } = req.body;
 
@@ -74,9 +72,16 @@ app.post('/api/auth/verify-pin', async (req, res) => {
             return res.status(404).json({ success: false, message: 'User or PIN record not found' });
         }
 
-        // Simple validation comparison (Adjust if your database uses deep encryption hashes)
         if (user.hashed_pin === pin) {
-            res.status(200).json({ success: true, authenticated: true });
+            // Fetch the user's actual wallet balance to send back to the web app
+            const { data: wallet } = await supabase
+                .from('wallets')
+                .select('balance')
+                .eq('user_id', userId)
+                .single();
+            
+            const currentBalance = wallet ? wallet.balance : 0;
+            res.status(200).json({ success: true, authenticated: true, balance: currentBalance });
         } else {
             res.status(401).json({ success: false, message: 'Invalid PIN configuration' });
         }
