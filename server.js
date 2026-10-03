@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -65,7 +66,6 @@ app.post('/api/auth/verify-pin', async (req, res) => {
     const { userId, pin } = req.body;
 
     try {
-        // Query looking up the 'id' field where your driver text 'DRV001' lives
         const { data: user, error } = await supabase
             .from('users')
             .select('id, hashed_pin')
