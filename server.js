@@ -8,78 +8,83 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// 🔐 CONNECT TO SUPABASE CLOUD (Paste your keys inside the single quotes below)
+// 🔒 CONNECT TO SUPABASE CLOUD (Safely using environment variables)
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-
-// ----------------------------------------------------
-// 🚦 DISPATCH ENDPOINT (Saves & Updates to Supabase)
-// ----------------------------------------------------
+// 🚏 1. DISPATCH ENDPOINT (Saves & Updates to Supabase)
 app.post('/api/queue/dispatch', async (req, res) => {
-    const { route, taxiId } = req.body; 
+    const { route, taxiId } = req.body;
     const dispatchFee = 2.00;
 
-    const { data: taxi, error: fetchErr } = await supabase
-        .from('taxis')
-        .select('*')
-        .eq('id', taxiId)
-        .single();
+    try {
+        const { data, error } = await supabase
+            .from('dispatches')
+            .insert([{ route, taxi_id: taxiId, fee: dispatchFee, created_at: new Date() }]);
 
-    if (fetchErr || !taxi) {
-        return res.status(404).json({ error: "Vehicle registration registry entity not found." });
+        if (error) throw error;
+        res.status(200).json({ success: true, message: 'Dispatch recorded successfully', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
-
-    if (taxi.wallet_balance < dispatchFee) {
-        return res.status(402).json({ error: `Insufficient funds. Balance: R${taxi.wallet_balance.toFixed(2)}.` });
-    }
-
-    const newBalance = taxi.wallet_balance - dispatchFee;
-
-    const { error: updateErr } = await supabase
-        .from('taxis')
-        .update({ wallet_balance: newBalance, status: 'Dispatched' })
-        .eq('id', taxiId);
-
-    if (updateErr) {
-        return res.status(500).json({ error: "Database transaction update failed." });
-    }
-
-    await supabase.from('logs').insert([{ event: `${taxi.plate} dispatched. R${dispatchFee} deducted.` }]);
-
-    res.json({ status: "Dispatched", taxiId: taxi.id, balance: newBalance });
 });
 
-// ----------------------------------------------------
-// 💳 SECURE TOP-UP ENDPOINT (Validates via Supabase)
-// ----------------------------------------------------
+// 💳 2. WALLET TOP-UP ENDPOINT
 app.post('/api/wallet/topup', async (req, res) => {
-    const { token } = req.body; 
-    const taxiId = 1; 
+    const { userId, amount } = req.body;
 
-    const { data: voucher, error: vErr } = await supabase
-        .from('vouchers')
-        .select('*')
-        .eq('code', token)
-        .eq('used', false)
-        .single();
+    try {
+        // Fetch current balance
+        const { data: wallet, error: fetchError } = await supabase
+            .from('wallets')
+            .select('balance')
+            .eq('user_id', userId)
+            .single();
 
-    if (vErr || !voucher) {
-        return res.status(400).json({ error: "The entered voucher PIN is invalid or already spent." });
+        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError; // PGRST116 means no row found
+
+        const currentBalance = wallet ? wallet.balance : 0;
+        const newBalance = currentBalance + parseFloat(amount);
+
+        // Update or Insert new balance
+        const { data, error: saveError } = await supabase
+            .from('wallets')
+            .upsert({ user_id: userId, balance: newBalance, updated_at: new Date() }, { onConflict: 'user_id' });
+
+        if (saveError) throw saveError;
+        res.status(200).json({ success: true, balance: newBalance });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
-
-    const { data: taxi } = await supabase.from('taxis').select('*').eq('id', taxiId).single();
-    const updatedBalance = taxi.wallet_balance + voucher.value;
-
-    await supabase.from('taxis').update({ wallet_balance: updatedBalance }).eq('id', taxiId);
-    await supabase.from('vouchers').update({ used: true }).eq('id', voucher.id); 
-    await supabase.from('logs').insert([{ event: `ID ${taxiId} loaded voucher token value R${voucher.value}` }]);
-
-    res.json({ 
-        balance: updatedBalance, 
-        added: voucher.value 
-    });
 });
 
-app.listen(PORT, () => console.log(`🚕 Persistent Cloud Engine active at http://localhost:${PORT}`));
+// 🔑 3. PIN VERIFICATION ENDPOINT
+app.post('/api/auth/verify-pin', async (req, res) => {
+    const { userId, pin } = req.body;
+
+    try {
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('hashed_pin')
+            .eq('id', userId)
+            .single();
+
+        if (error || !user) {
+            return res.status(404).json({ success: false, message: 'User or PIN record not found' });
+        }
+
+        // Simple validation comparison (Adjust if your database uses deep encryption hashes)
+        if (user.hashed_pin === pin) {
+            res.status(200).json({ success: true, authenticated: true });
+        } else {
+            res.status(401).json({ success: false, message: 'Invalid PIN configuration' });
+        }
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running securely on port ${PORT}`);
+});
