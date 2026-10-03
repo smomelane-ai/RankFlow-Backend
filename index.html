@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RankFlow - Taxi Logistics Engine</title>
+    <!-- Install-as-app (PWA) support -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#111827">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="RankFlow">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="apple-touch-icon" href="icon-192.png">
     <style>
         body { font-family: sans-serif; background-color: #111827; color: #f3f4f6; padding: 20px; max-width: 600px; margin: 0 auto; }
         .card { background-color: #1f2937; border: 1px solid #374151; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
@@ -12,11 +20,13 @@
         button:hover { background-color: #d97706; }
         button:disabled { opacity: .5; cursor: wait; }
         .success-box { padding: 10px; background-color: #064e3b; color: #34d399; border-radius: 4px; margin-top: 10px; display: none; text-align: center; }
+        #offlineBar { display: none; background: #4c0519; color: #fecdd3; padding: 10px; border-radius: 6px; margin-bottom: 12px; text-align: center; font-weight: bold; }
         .error-box { padding: 10px; background-color: #4c0519; color: #f43f5e; border-radius: 4px; margin-top: 10px; display: none; text-align: center; }
     </style>
 </head>
 <body>
 
+    <div id="offlineBar">You are offline. RankFlow needs a connection to log in and dispatch.</div>
     <h1>RankFlow Live Terminal</h1>
     <p id="serverStatus" style="color: #f59e0b;">● Server Status: Checking...</p>
 
@@ -71,7 +81,7 @@
 
     <script>
         // Must be the exact URL shown at the top of your backend service in the Render dashboard.
-        const BACKEND_URL = "https://rankflow-backend-1.onrender.com"
+        const BACKEND_URL = "https://rankflow-backend-1.onrender.com";
         let activeUserId = "";
         const $ = (id) => document.getElementById(id);
 
@@ -123,6 +133,17 @@
             }
         }
         checkServer();
+
+        // Offline banner
+        function updateOnline() { $('offlineBar').style.display = navigator.onLine ? 'none' : 'block'; }
+        window.addEventListener('online', () => { updateOnline(); checkServer(); });
+        window.addEventListener('offline', updateOnline);
+        updateOnline();
+
+        // Register the service worker so the page can be installed and opens fast
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+        }
 
         async function handleVerifyPin(btn) {
             const userId = $('driverIdInput').value.trim();
