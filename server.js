@@ -13,6 +13,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// 🩺 HEALTH CHECK ROUTE (Suggested by Claude to test connection status)
+app.get('/health', (req, res) => res.json({ ok: true }));
+
 // 🚏 1. DISPATCH ENDPOINT
 app.post('/api/queue/dispatch', async (req, res) => {
     const { route, taxiId } = req.body;
@@ -57,33 +60,33 @@ app.post('/api/wallet/topup', async (req, res) => {
     }
 });
 
-// 🔑 3. PIN VERIFICATION ENDPOINT (Now returns the real database balance!)
+// 🔑 3. PIN VERIFICATION ENDPOINT (Matches your text-based database setup)
 app.post('/api/auth/verify-pin', async (req, res) => {
     const { userId, pin } = req.body;
 
     try {
+        // Query looking up the 'id' field where your driver text 'DRV001' lives
         const { data: user, error } = await supabase
             .from('users')
-            .select('hashed_pin')
+            .select('id, hashed_pin')
             .eq('id', userId)
             .single();
 
         if (error || !user) {
-            return res.status(404).json({ success: false, message: 'User or PIN record not found' });
+            return res.status(404).json({ success: false, message: 'Wrong ID or PIN' });
         }
 
         if (user.hashed_pin === pin) {
-            // Fetch the user's actual wallet balance to send back to the web app
             const { data: wallet } = await supabase
                 .from('wallets')
                 .select('balance')
-                .eq('user_id', userId)
+                .eq('user_id', user.id)
                 .single();
             
             const currentBalance = wallet ? wallet.balance : 0;
             res.status(200).json({ success: true, authenticated: true, balance: currentBalance });
         } else {
-            res.status(401).json({ success: false, message: 'Invalid PIN configuration' });
+            res.status(401).json({ success: false, message: 'Wrong ID or PIN' });
         }
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
