@@ -96,6 +96,8 @@ app.post('/api/auth/verify-pin', async (req, res) => {
     try {
         const { data: user, error } = await supabase
             .from('users').select('id, hashed_pin').eq('id', userId).single();
+                console.log('Login attempt for:', JSON.stringify(userId));
+        if (error) console.error('Lookup error:', error.code, error.message);
         if (error || !user) {
             return res.status(404).json({ success: false, message: 'Wrong ID or PIN' });
         }
