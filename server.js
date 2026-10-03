@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -7,116 +8,274 @@ const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
-   app.use((req, res, next) => {
-       console.log(req.method, req.url);
-       next();
-   });
 
-// Connect to Supabase (use the service_role key in SUPABASE_KEY on the server only)
+// Connect to Supabase (the service_role key lives only in Render's Environment page)
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const DISPATCH_FEE = 2.0;
-const MAX_TOPUP = 500; // DEMO safety cap per request. Remove once top-ups are tied to real payments.
+const MAX_TOPUP = 500; // DEMO cap per top-up. Removed once top-ups are tied to real payments.
+const OFFER_SECONDS = 30; // how long a driver has to accept a dispatch
+const TOKEN_HOURS = 12; // how long a login lasts
+const ROUTES = ['Durban to Inanda', 'Durban to KwaMashu', 'Umlazi to CBD', 'Pinetown to KwaMashu'];
+const ACTIVE = ['In Queue', 'Offered', 'Break'];
 
-// Log the real error for you in Render Logs, but send the app a plain message
+/* ---------- Login tokens (signed with TOKEN_SECRET, no extra libraries) ---------- */
+const SECRET = process.env.TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.TOKEN_SECRET) console.warn('TOKEN_SECRET is not set: everyone is logged out whenever the server restarts.');
+
+const sign = (p) => crypto.createHmac('sha256', SECRET).update(p).digest('base64url');
+function makeToken(user) {
+    const p = Buffer.from(JSON.stringify({ id: user.id, role: user.role, exp: Date.now() + TOKEN_HOURS * 3600 * 1000 })).toString('base64url');
+    return p + '.' + sign(p);
+}
+function readToken(t) {
+    try {
+        const [p, s] = String(t).split('.');
+        const a = Buffer.from(s || ''), b = Buffer.from(sign(p));
+        if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+        const d = JSON.parse(Buffer.from(p, 'base64url').toString());
+        return d.exp > Date.now() ? d : null;
+    } catch (e) { return null; }
+}
+// Use auth() for any logged-in user, or auth('manager') / auth('driver') for one role
+function auth(...roles) {
+    return (req, res, next) => {
+        const u = readToken((req.headers.authorization || '').replace('Bearer ', ''));
+        if (!u) return res.status(401).json({ success: false, error: 'Please log in again' });
+        if (roles.length && !roles.includes(u.role)) return res.status(403).json({ success: false, error: 'Not allowed for your role' });
+        req.user = u;
+        next();
+    };
+}
+
+/* ---------- Helpers ---------- */
 function fail(res, err, status = 500) {
     console.error(err);
     res.status(status).json({ success: false, error: 'Something went wrong on the server' });
 }
+const cleanPlate = (p) => String(p || '').trim().toUpperCase().slice(0, 20);
 
-// Health check
+// Take a fee from a wallet. Only succeeds if the balance did not change in between.
+async function chargeWallet(userId, amount) {
+    const { data: w } = await supabase.from('wallets').select('balance').eq('user_id', userId).maybeSingle();
+    if (!w) return { error: 'Wallet not found', status: 404 };
+    const current = Number(w.balance);
+    if (current < amount) return { error: 'Not enough balance. Top up first.', status: 402, balance: current };
+    const next = +(current - amount).toFixed(2);
+    const { data: up, error } = await supabase.from('wallets')
+        .update({ balance: next, updated_at: new Date() }).eq('user_id', userId).eq('balance', w.balance).select();
+    if (error) throw error;
+    if (!up || up.length === 0) return { error: 'Balance changed. Please try again.', status: 409 };
+    return { balance: next, previous: current };
+}
+
+// Offers nobody answered within 30 seconds go to the back of the queue
+async function expireOffers(route) {
+    const cutoff = new Date(Date.now() - OFFER_SECONDS * 1000).toISOString();
+    await supabase.from('queue_entries')
+        .update({ status: 'In Queue', joined_at: new Date().toISOString(), offered_at: null })
+        .eq('route', route).eq('status', 'Offered').lt('offered_at', cutoff);
+}
+
+/* ---------- Basic ---------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// 1. DISPATCH: checks balance, takes the R2.00 fee, records the dispatch, returns the new balance
-app.post('/api/queue/dispatch', async (req, res) => {
-    const { route, taxiId, userId } = req.body;
-    if (!route || !taxiId || !userId) {
-        return res.status(400).json({ success: false, error: 'Route, fleet ID and user are required' });
-    }
-
+/* ---------- Login (works with a plain PIN now, and a bcrypt hash later) ---------- */
+app.post('/api/auth/verify-pin', async (req, res) => {
+    const { userId, pin } = req.body;
+    if (!userId || !pin) return res.status(400).json({ success: false, message: 'Driver ID and PIN are required' });
     try {
-        const { data: wallet, error: walletError } = await supabase
-            .from('wallets').select('balance').eq('user_id', userId).single();
-        if (walletError || !wallet) {
-            return res.status(404).json({ success: false, error: 'Wallet not found' });
-        }
+        const { data: user, error } = await supabase.from('users')
+            .select('id, hashed_pin, role, full_name, plate').eq('id', userId).maybeSingle();
+        if (error) throw error;
+        if (!user) return res.status(404).json({ success: false, message: 'Wrong ID or PIN' });
 
-        const current = Number(wallet.balance);
-        if (current < DISPATCH_FEE) {
-            return res.status(402).json({ success: false, error: 'Not enough balance. Top up first.', balance: current });
-        }
-        const newBalance = +(current - DISPATCH_FEE).toFixed(2);
+        const stored = String(user.hashed_pin);
+        const valid = stored.startsWith('$2') ? await require('bcryptjs').compare(String(pin), stored) : stored === String(pin);
+        if (!valid) return res.status(401).json({ success: false, message: 'Wrong ID or PIN' });
 
-        // Only deduct if the balance has not changed since we read it (stops double-spend races)
-        const { data: updated, error: deductError } = await supabase
-            .from('wallets').update({ balance: newBalance, updated_at: new Date() })
-            .eq('user_id', userId).eq('balance', wallet.balance).select();
-        if (deductError) throw deductError;
-        if (!updated || updated.length === 0) {
-            return res.status(409).json({ success: false, error: 'Balance changed. Please try again.' });
-        }
-
-        const { error: insertError } = await supabase
-            .from('dispatches').insert([{ route, taxi_id: taxiId, fee: DISPATCH_FEE, created_at: new Date() }]);
-        if (insertError) {
-            // Dispatch failed to save, so give the fee back
-            await supabase.from('wallets').update({ balance: current }).eq('user_id', userId);
-            throw insertError;
-        }
-
-        res.status(200).json({ success: true, message: 'Dispatch recorded successfully', balance: newBalance });
+        const { data: wallet } = await supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle();
+        res.json({
+            success: true, authenticated: true,
+            balance: wallet ? Number(wallet.balance) : 0,
+            token: makeToken(user),
+            user: { id: user.id, role: user.role, name: user.full_name, plate: user.plate }
+        });
     } catch (err) { fail(res, err); }
 });
 
-// 2. WALLET TOP-UP (DEMO ONLY: anyone can add funds. Needs a payment or token check before real use.)
+/* ---------- Wallet top-up (DEMO ONLY: tied to a real payment or token in the next step) ---------- */
 app.post('/api/wallet/topup', async (req, res) => {
     const { userId, amount } = req.body;
     const value = Number(amount);
     if (!userId || !(value > 0) || value > MAX_TOPUP) {
         return res.status(400).json({ success: false, error: `Amount must be between R1 and R${MAX_TOPUP}` });
     }
-
     try {
-        const { data: wallet, error: fetchError } = await supabase
-            .from('wallets').select('balance').eq('user_id', userId).single();
-        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
-
+        const { data: wallet, error: fetchError } = await supabase.from('wallets').select('balance').eq('user_id', userId).maybeSingle();
+        if (fetchError) throw fetchError;
         const newBalance = +((wallet ? Number(wallet.balance) : 0) + value).toFixed(2);
-        const { error: saveError } = await supabase
-            .from('wallets').upsert({ user_id: userId, balance: newBalance, updated_at: new Date() }, { onConflict: 'user_id' });
+        const { error: saveError } = await supabase.from('wallets')
+            .upsert({ user_id: userId, balance: newBalance, updated_at: new Date() }, { onConflict: 'user_id' });
         if (saveError) throw saveError;
-
-        res.status(200).json({ success: true, balance: newBalance });
+        res.json({ success: true, balance: newBalance });
     } catch (err) { fail(res, err); }
 });
 
-// 3. PIN VERIFICATION (works with a plain PIN now, and with a bcrypt hash later)
-app.post('/api/auth/verify-pin', async (req, res) => {
-    const { userId, pin } = req.body;
-    if (!userId || !pin) {
-        return res.status(400).json({ success: false, message: 'Driver ID and PIN are required' });
-    }
-
+/* ---------- LEGACY dispatch used by the current terminal page (replaced in the next step) ---------- */
+app.post('/api/queue/dispatch', async (req, res) => {
+    const { route, taxiId, userId } = req.body;
+    if (!route || !taxiId || !userId) return res.status(400).json({ success: false, error: 'Route, fleet ID and user are required' });
     try {
-        const { data: user, error } = await supabase
-            .from('users').select('id, hashed_pin').eq('id', userId).single();
-                console.log('Login attempt for:', JSON.stringify(userId));
-        if (error) console.error('Lookup error:', error.code, error.message);
-        if (error || !user) {
-            return res.status(404).json({ success: false, message: 'Wrong ID or PIN' });
+        const c = await chargeWallet(userId, DISPATCH_FEE);
+        if (c.error) return res.status(c.status).json({ success: false, error: c.error, balance: c.balance });
+        const { error } = await supabase.from('dispatches').insert([{ route, taxi_id: taxiId, fee: DISPATCH_FEE, created_at: new Date() }]);
+        if (error) {
+            await supabase.from('wallets').update({ balance: c.previous }).eq('user_id', userId);
+            throw error;
         }
+        res.json({ success: true, message: 'Dispatch recorded successfully', balance: c.balance });
+    } catch (err) { fail(res, err); }
+});
 
-        let valid;
-        if (String(user.hashed_pin).startsWith('$2')) {
-            valid = await require('bcryptjs').compare(String(pin), user.hashed_pin); // npm i bcryptjs
+/* ---------- Live queue ---------- */
+
+// Everyone logged in can see the queue for a route
+app.get('/api/queue', auth(), async (req, res) => {
+    const route = req.query.route;
+    if (!ROUTES.includes(route)) return res.status(400).json({ success: false, error: 'Unknown route' });
+    try {
+        await expireOffers(route);
+        const { data: queue, error } = await supabase.from('queue_entries').select('*')
+            .eq('route', route).in('status', ACTIVE).order('joined_at', { ascending: true });
+        if (error) throw error;
+        const { data: recent } = await supabase.from('queue_entries').select('*')
+            .eq('route', route).eq('status', 'Dispatched').order('joined_at', { ascending: false }).limit(5);
+        const now = Date.now();
+        res.json({
+            success: true,
+            queue: queue.map((e) => e.status === 'Offered'
+                ? { ...e, secondsLeft: Math.max(0, OFFER_SECONDS - Math.floor((now - new Date(e.offered_at)) / 1000)) } : e),
+            recent: recent || []
+        });
+    } catch (err) { fail(res, err); }
+});
+
+// A driver checks into the queue with their own plate. A manager can add any taxi by plate.
+app.post('/api/queue/join', auth(), async (req, res) => {
+    const { route } = req.body;
+    if (!ROUTES.includes(route)) return res.status(400).json({ success: false, error: 'Unknown route' });
+    try {
+        let plate, driverId = null, driverName = null;
+        if (req.user.role === 'driver') {
+            const { data: me } = await supabase.from('users').select('id, full_name, plate').eq('id', req.user.id).maybeSingle();
+            if (!me || !me.plate) return res.status(400).json({ success: false, error: 'Your account has no number plate yet' });
+            plate = cleanPlate(me.plate); driverId = me.id; driverName = me.full_name;
         } else {
-            valid = user.hashed_pin === String(pin);
+            plate = cleanPlate(req.body.plate);
+            driverName = String(req.body.driverName || '').trim().slice(0, 60) || 'Driver TBC';
+            if (plate.length < 4) return res.status(400).json({ success: false, error: 'Enter the number plate' });
         }
-        if (!valid) return res.status(401).json({ success: false, message: 'Wrong ID or PIN' });
+        const { data: dup } = await supabase.from('queue_entries').select('id').eq('plate', plate).in('status', ACTIVE).limit(1);
+        if (dup && dup.length) return res.status(409).json({ success: false, error: 'This taxi is already in a queue' });
+        const { data, error } = await supabase.from('queue_entries')
+            .insert([{ route, plate, driver_id: driverId, driver_name: driverName, status: 'In Queue' }]).select().single();
+        if (error) throw error;
+        res.json({ success: true, entry: data });
+    } catch (err) { fail(res, err); }
+});
 
-        const { data: wallet } = await supabase
-            .from('wallets').select('balance').eq('user_id', user.id).single();
-        res.status(200).json({ success: true, authenticated: true, balance: wallet ? Number(wallet.balance) : 0 });
+// A driver leaves the queue
+app.post('/api/queue/leave', auth('driver'), async (req, res) => {
+    try {
+        const { error } = await supabase.from('queue_entries').delete().eq('driver_id', req.user.id).in('status', ['In Queue', 'Break']);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (err) { fail(res, err); }
+});
+
+// Manager: offer the trip to the first taxi in line
+app.post('/api/queue/dispatch-next', auth('manager'), async (req, res) => {
+    const { route } = req.body;
+    if (!ROUTES.includes(route)) return res.status(400).json({ success: false, error: 'Unknown route' });
+    try {
+        await expireOffers(route);
+        const { data: waiting } = await supabase.from('queue_entries').select('id').eq('route', route).eq('status', 'Offered').limit(1);
+        if (waiting && waiting.length) return res.status(409).json({ success: false, error: 'Waiting for a driver to answer the last dispatch' });
+        const { data: head } = await supabase.from('queue_entries').select('*').eq('route', route).eq('status', 'In Queue')
+            .order('joined_at', { ascending: true }).limit(1).maybeSingle();
+        if (!head) return res.status(404).json({ success: false, error: 'No taxis waiting on this route' });
+
+        if (head.driver_id) {
+            // A registered driver gets 30 seconds to accept on their phone
+            await supabase.from('queue_entries').update({ status: 'Offered', offered_at: new Date().toISOString() }).eq('id', head.id);
+            return res.json({ success: true, status: 'Offered', entry: head });
+        }
+        // A taxi added by hand has no phone, so it is dispatched straight away (no fee)
+        await supabase.from('queue_entries').update({ status: 'Dispatched' }).eq('id', head.id);
+        await supabase.from('dispatches').insert([{ route, taxi_id: head.plate, fee: 0, created_at: new Date() }]);
+        res.json({ success: true, status: 'Dispatched', entry: head });
+    } catch (err) { fail(res, err); }
+});
+
+// Driver accepts the offer: the fee is taken and the dispatch is recorded
+app.post('/api/queue/accept', auth('driver'), async (req, res) => {
+    try {
+        const { data: e } = await supabase.from('queue_entries').select('*').eq('driver_id', req.user.id).eq('status', 'Offered').maybeSingle();
+        if (!e) return res.status(404).json({ success: false, error: 'No dispatch is waiting for you' });
+        if (Date.now() - new Date(e.offered_at) > OFFER_SECONDS * 1000) {
+            await expireOffers(e.route);
+            return res.status(410).json({ success: false, error: 'The offer ran out of time' });
+        }
+        const c = await chargeWallet(req.user.id, DISPATCH_FEE);
+        if (c.error) return res.status(c.status).json({ success: false, error: c.error, balance: c.balance });
+        const { error } = await supabase.from('dispatches').insert([{ route: e.route, taxi_id: e.plate, fee: DISPATCH_FEE, created_at: new Date() }]);
+        if (error) {
+            await supabase.from('wallets').update({ balance: c.previous }).eq('user_id', req.user.id);
+            throw error;
+        }
+        await supabase.from('queue_entries').update({ status: 'Dispatched' }).eq('id', e.id);
+        res.json({ success: true, balance: c.balance });
+    } catch (err) { fail(res, err); }
+});
+
+// Driver rejects: goes to the back of the queue
+app.post('/api/queue/reject', auth('driver'), async (req, res) => {
+    try {
+        const { error } = await supabase.from('queue_entries')
+            .update({ status: 'In Queue', joined_at: new Date().toISOString(), offered_at: null })
+            .eq('driver_id', req.user.id).eq('status', 'Offered');
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (err) { fail(res, err); }
+});
+
+// Manager: put a taxi on break, or bring it back
+app.post('/api/queue/break', auth('manager'), async (req, res) => {
+    try {
+        const { data: e } = await supabase.from('queue_entries').select('id, status').eq('id', req.body.id).maybeSingle();
+        if (!e || !['In Queue', 'Break'].includes(e.status)) return res.status(404).json({ success: false, error: 'Taxi not found' });
+        await supabase.from('queue_entries').update({ status: e.status === 'Break' ? 'In Queue' : 'Break' }).eq('id', e.id);
+        res.json({ success: true });
+    } catch (err) { fail(res, err); }
+});
+
+// Manager removes a taxi from the queue
+app.post('/api/queue/remove', auth('manager'), async (req, res) => {
+    try {
+        await supabase.from('queue_entries').delete().eq('id', req.body.id).in('status', ACTIVE);
+        res.json({ success: true });
+    } catch (err) { fail(res, err); }
+});
+
+// A dispatched taxi comes back to the end of the queue (manager, or the driver for their own taxi)
+app.post('/api/queue/rejoin', auth(), async (req, res) => {
+    try {
+        const { data: e } = await supabase.from('queue_entries').select('*').eq('id', req.body.id).eq('status', 'Dispatched').maybeSingle();
+        if (!e) return res.status(404).json({ success: false, error: 'Taxi not found' });
+        if (req.user.role === 'driver' && e.driver_id !== req.user.id) return res.status(403).json({ success: false, error: 'Not your taxi' });
+        await supabase.from('queue_entries').update({ status: 'In Queue', joined_at: new Date().toISOString(), offered_at: null }).eq('id', e.id);
+        res.json({ success: true });
     } catch (err) { fail(res, err); }
 });
 
