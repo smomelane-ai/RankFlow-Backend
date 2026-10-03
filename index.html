@@ -10,6 +10,7 @@
         input, select { width: 100%; padding: 10px; margin: 8px 0; background-color: #0f172a; color: white; border: 1px solid #374151; border-radius: 4px; box-sizing: border-box; }
         button { width: 100%; padding: 12px; background-color: #f59e0b; color: #111827; border: none; font-weight: bold; border-radius: 4px; cursor: pointer; margin-top: 10px; }
         button:hover { background-color: #d97706; }
+        button:disabled { opacity: .5; cursor: wait; }
         .success-box { padding: 10px; background-color: #064e3b; color: #34d399; border-radius: 4px; margin-top: 10px; display: none; text-align: center; }
         .error-box { padding: 10px; background-color: #4c0519; color: #f43f5e; border-radius: 4px; margin-top: 10px; display: none; text-align: center; }
     </style>
@@ -17,26 +18,26 @@
 <body>
 
     <h1>RankFlow Live Terminal</h1>
-    <p style="color: #10b981;">● Server Status: Connected</p>
+    <p id="serverStatus" style="color: #f59e0b;">● Server Status: Checking...</p>
 
-    <!-- 🔑 LOGIN SCREEN -->
+    <!-- LOGIN SCREEN -->
     <div id="authCard" class="card">
         <h2>Driver Access Portal</h2>
         <p style="color: #9ca3af; font-size: 14px;">Verify your system PIN to log in.</p>
-        
+
         <label>Driver ID / License Number</label>
         <input type="text" id="driverIdInput" placeholder="e.g., DRV001">
-        
+
         <label>Security PIN Code</label>
-        <input type="password" id="pinInput" placeholder="••••" maxlength="4">
-        
-        <button onclick="handleVerifyPin()">Verify Terminal access</button>
+        <input type="password" id="pinInput" placeholder="••••" maxlength="4" inputmode="numeric">
+
+        <button onclick="handleVerifyPin(this)">Verify Terminal access</button>
         <div id="authMessage" class="error-box"></div>
     </div>
 
-    <!-- 🏎️ WORKSPACE -->
+    <!-- WORKSPACE -->
     <div id="workspace" style="display: none;">
-        
+
         <div class="card" style="background-color: #111827; text-align: center; border: 2px solid #f59e0b;">
             <h3 style="color: #9ca3af; margin: 0;">Available Commuter Balance</h3>
             <p style="font-size: 40px; font-weight: bold; margin: 10px 0; color: white;" id="walletDisplay">R 0.00</p>
@@ -46,7 +47,7 @@
         <div class="card">
             <h3>Top-Up Smart Wallet</h3>
             <input type="number" id="topupAmount" placeholder="Amount (R)">
-            <button onclick="handleTopup()" style="background-color: #4b5563; color: white;">Load Funds</button>
+            <button onclick="handleTopup(this)" style="background-color: #4b5563; color: white;">Load Funds</button>
             <div id="walletMessage" class="success-box"></div>
         </div>
 
@@ -58,120 +59,126 @@
                 <option value="Umlazi to CBD">Umlazi to CBD</option>
                 <option value="Pinetown to KwaMashu">Pinetown to KwaMashu</option>
             </select>
-            
+
             <label>Taxi Vehicle Fleet ID</label>
             <input type="text" id="taxiIdInput" placeholder="e.g., ND-887-231">
-            
-            <button onclick="handleDispatch()" style="background-color: #059669; color: white;">Confirm Dispatch Logs</button>
+
+            <button onclick="handleDispatch(this)" style="background-color: #059669; color: white;">Confirm Dispatch Logs</button>
             <div id="dispatchMessage" class="success-box"></div>
         </div>
 
     </div>
 
     <script>
-        // 📡 LINK TO YOUR NEW WEB SERVICE ADDRESS
-        const BACKEND_URL = "https://onrender.com";
+        // Must be the exact URL shown at the top of your backend service in the Render dashboard.
+        const BACKEND_URL = "https://rankflow-backend-1.onrender.com";
         let activeUserId = "";
+        const $ = (id) => document.getElementById(id);
 
-        function showError(msg) {
-            const msgEl = document.getElementById('authMessage');
-            msgEl.innerText = msg;
-            msgEl.style.display = 'block';
+        // Show a green (ok) or red (error) message in a message box
+        function say(id, text, ok) {
+            const el = $(id);
+            el.className = ok ? 'success-box' : 'error-box';
+            el.innerText = text;
+            el.style.display = 'block';
         }
 
-        async function handleVerifyPin() {
-            const userId = document.getElementById('driverIdInput').value.trim();
-            const pin = document.getElementById('pinInput').value.trim();
-            document.getElementById('authMessage').style.display = 'none';
-
-            if (!userId || !pin) {
-                showError('Please fill in both Driver ID and PIN');
-                return;
-            }
-
+        // POST helper: waits up to 70s (Render free plan can be asleep) and never throws
+        async function api(path, body) {
+            const ctl = new AbortController();
+            const timer = setTimeout(() => ctl.abort(), 70000);
             try {
-                const res = await fetch(BACKEND_URL + "/api/auth/verify-pin", {
-                    method: "POST", 
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ userId, pin })
+                const res = await fetch(BACKEND_URL + path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                    signal: ctl.signal
                 });
-                
                 const data = await res.json().catch(() => ({}));
-                
-                if (res.status === 401 || res.status === 404) {
-                    return showError(data.message || "Wrong ID or PIN");
-                }
-                if (!res.ok) {
-                    return showError("Server error (" + res.status + ")");
-                }
-
-                // Success block
-                activeUserId = userId;
-                document.getElementById('authCard').style.display = 'none';
-                document.getElementById('workspace').style.display = 'block';
-                document.getElementById('walletDisplay').innerText = `R ${parseFloat(data.balance).toFixed(2)}`;
-                
+                return { ok: res.ok, status: res.status, data };
             } catch (e) {
-                showError("Cannot reach the server. Wait 60 seconds if it was asleep, then try again.");
+                return { ok: false, status: 0, data: {}, network: true };
+            } finally {
+                clearTimeout(timer);
             }
         }
 
-        async function handleTopup() {
-            const amount = document.getElementById('topupAmount').value;
-            const msgEl = document.getElementById('walletMessage');
-            msgEl.style.display = 'none';
-
-            if (!amount || amount <= 0) {
-                alert('Enter a valid amount');
-                return;
-            }
-
+        // Real server status (needs the GET /health route on the backend)
+        async function checkServer() {
+            const el = $('serverStatus');
+            el.style.color = '#f59e0b';
+            el.innerText = '● Server Status: Waking up (can take up to 60 seconds)...';
+            const ctl = new AbortController();
+            const timer = setTimeout(() => ctl.abort(), 70000);
             try {
-                const response = await fetch(`${BACKEND_URL}/api/wallet/topup`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userId: activeUserId, amount })
-                });
-                const result = await response.json();
-
-                if (result.success) {
-                    document.getElementById('walletDisplay').innerText = `R ${parseFloat(result.balance).toFixed(2)}`;
-                    msgEl.innerText = 'Funds successfully deposited into cloud ledger.';
-                    msgEl.style.display = 'block';
-                    document.getElementById('topupAmount').value = '';
-                }
-            } catch (err) {
-                alert('Network error during topup.');
+                const r = await fetch(BACKEND_URL + '/health', { signal: ctl.signal });
+                if (!r.ok) throw new Error('bad status');
+                el.style.color = '#10b981';
+                el.innerText = '● Server Status: Connected';
+            } catch (e) {
+                el.style.color = '#f43f5e';
+                el.innerText = '● Server Status: Cannot reach server (check the backend URL)';
+            } finally {
+                clearTimeout(timer);
             }
         }
+        checkServer();
 
-        async function handleDispatch() {
-            const route = document.getElementById('routeSelect').value;
-            const taxiId = document.getElementById('taxiIdInput').value.trim();
-            const msgEl = document.getElementById('dispatchMessage');
-            msgEl.style.display = 'none';
+        async function handleVerifyPin(btn) {
+            const userId = $('driverIdInput').value.trim();
+            const pin = $('pinInput').value.trim();
+            $('authMessage').style.display = 'none';
 
-            if (!taxiId) {
-                alert('Please provide a Fleet ID');
-                return;
-            }
+            if (!userId || !pin) { say('authMessage', 'Please fill in both Driver ID and PIN', false); return; }
 
-            try {
-                const response = await fetch(`${BACKEND_URL}/api/queue/dispatch`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ route, taxiId })
-                });
-                const result = await response.json();
+            btn.disabled = true;
+            const r = await api('/api/auth/verify-pin', { userId, pin });
+            btn.disabled = false;
 
-                if (result.success) {
-                    msgEl.innerText = `Success! Fleet ${taxiId} dispatched on ${route}.`;
-                    msgEl.style.display = 'block';
-                    document.getElementById('taxiIdInput').value = '';
-                }
-            } catch (err) {
-                alert('Server synchronization error.');
-            }
+            if (r.network) return say('authMessage', 'Cannot reach the server. Wait 60 seconds if it was asleep, then try again.', false);
+            if (r.status === 401 || r.status === 404) return say('authMessage', r.data.message || 'Wrong ID or PIN', false);
+            if (!r.ok) return say('authMessage', 'Server error (' + r.status + ')', false);
+
+            activeUserId = userId;
+            $('authCard').style.display = 'none';
+            $('workspace').style.display = 'block';
+            $('walletDisplay').innerText = 'R ' + parseFloat(r.data.balance).toFixed(2);
+        }
+
+        async function handleTopup(btn) {
+            const amount = $('topupAmount').value;
+            $('walletMessage').style.display = 'none';
+            if (!amount || amount <= 0) { say('walletMessage', 'Enter a valid amount', false); return; }
+
+            btn.disabled = true;
+            const r = await api('/api/wallet/topup', { userId: activeUserId, amount });
+            btn.disabled = false;
+
+            if (r.network) return say('walletMessage', 'Network error during top-up. Try again.', false);
+            if (!r.ok || !r.data.success) return say('walletMessage', r.data.error || r.data.message || 'Top-up failed (' + r.status + ')', false);
+
+            $('walletDisplay').innerText = 'R ' + parseFloat(r.data.balance).toFixed(2);
+            say('walletMessage', 'Funds successfully deposited into cloud ledger.', true);
+            $('topupAmount').value = '';
+        }
+
+        async function handleDispatch(btn) {
+            const route = $('routeSelect').value;
+            const taxiId = $('taxiIdInput').value.trim();
+            $('dispatchMessage').style.display = 'none';
+            if (!taxiId) { say('dispatchMessage', 'Please provide a Fleet ID', false); return; }
+
+            btn.disabled = true; // stops double-tap logging the same dispatch twice
+            const r = await api('/api/queue/dispatch', { route, taxiId, userId: activeUserId });
+            btn.disabled = false;
+
+            if (r.network) return say('dispatchMessage', 'Server synchronization error. Try again.', false);
+            if (!r.ok || !r.data.success) return say('dispatchMessage', r.data.error || r.data.message || 'Dispatch failed (' + r.status + ')', false);
+
+            // The server should return the new balance once it deducts the R2.00 fee
+            if (typeof r.data.balance === 'number') $('walletDisplay').innerText = 'R ' + r.data.balance.toFixed(2);
+            say('dispatchMessage', 'Success! Fleet ' + taxiId + ' dispatched on ' + route + '.', true);
+            $('taxiIdInput').value = '';
         }
     </script>
 </body>
