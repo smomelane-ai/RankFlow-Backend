@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
+app.set('trust proxy', 1); // so we see each visitor's real address behind Render
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
@@ -13,7 +14,8 @@ app.use(express.json());
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const DISPATCH_FEE = 2.0;
-const MAX_TOPUP = 500; // DEMO cap per top-up. Removed once top-ups are tied to real payments.
+const MAX_TRIES = 5; // wrong PINs or codes allowed per person in 15 minutes
+const LOCK_MS = 15 * 60 * 1000;
 const OFFER_SECONDS = 30; // how long a driver has to accept a dispatch
 const TOKEN_HOURS = 12; // how long a login lasts
 const ROUTES = ['Durban to Inanda', 'Durban to KwaMashu', 'Umlazi to CBD', 'Pinetown to KwaMashu'];
@@ -48,6 +50,32 @@ function auth(...roles) {
     };
 }
 
+/* ---------- PIN hashing (built in, no extra libraries) ---------- */
+const scrypt = (pw, salt) => new Promise((ok, no) => crypto.scrypt(pw, salt, 32, (e, k) => (e ? no(e) : ok(k))));
+async function hashPin(pin) {
+    const salt = crypto.randomBytes(16);
+    return 'scrypt$' + salt.toString('hex') + '$' + (await scrypt(String(pin), salt)).toString('hex');
+}
+async function checkPin(pin, stored) {
+    stored = String(stored);
+    if (stored.startsWith('scrypt$')) {
+        const [, salt, hash] = stored.split('$');
+        const k = await scrypt(String(pin), Buffer.from(salt, 'hex'));
+        const h = Buffer.from(hash, 'hex');
+        return k.length === h.length && crypto.timingSafeEqual(k, h);
+    }
+    return stored === String(pin); // an old plain PIN: it is turned into a hash after a successful login
+}
+
+/* ---------- Lock out repeated wrong guesses (kept in memory) ---------- */
+const fails = new Map();
+const locked = (key, max = MAX_TRIES) => { const f = fails.get(key); return !!f && Date.now() - f.first < LOCK_MS && f.n >= max; };
+function addFail(key) {
+    const f = fails.get(key);
+    if (!f || Date.now() - f.first >= LOCK_MS) fails.set(key, { n: 1, first: Date.now() }); else f.n++;
+}
+setInterval(() => { for (const [k, f] of fails) if (Date.now() - f.first >= LOCK_MS) fails.delete(k); }, 10 * 60 * 1000);
+
 /* ---------- Helpers ---------- */
 function fail(res, err, status = 500) {
     console.error(err);
@@ -69,6 +97,20 @@ async function chargeWallet(userId, amount) {
     return { balance: next, previous: current };
 }
 
+// Add money to a wallet. Only succeeds if the balance did not change in between.
+async function creditWallet(userId, amount) {
+    for (let i = 0; i < 3; i++) {
+        const { data: w } = await supabase.from('wallets').select('balance').eq('user_id', userId).maybeSingle();
+        if (!w) return { error: 'Wallet not found', status: 404 };
+        const next = +(Number(w.balance) + amount).toFixed(2);
+        const { data: up, error } = await supabase.from('wallets')
+            .update({ balance: next, updated_at: new Date() }).eq('user_id', userId).eq('balance', w.balance).select();
+        if (error) throw error;
+        if (up && up.length) return { balance: next };
+    }
+    return { error: 'Balance changed. Please try again.', status: 409 };
+}
+
 // Offers nobody answered within 30 seconds go to the back of the queue
 async function expireOffers(route) {
     const cutoff = new Date(Date.now() - OFFER_SECONDS * 1000).toISOString();
@@ -80,20 +122,29 @@ async function expireOffers(route) {
 /* ---------- Basic ---------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-/* ---------- Login (works with a plain PIN now, and a bcrypt hash later) ---------- */
+/* ---------- Login ---------- */
 app.post('/api/auth/verify-pin', async (req, res) => {
-    const { userId, pin } = req.body;
-    if (!userId || !pin) return res.status(400).json({ success: false, message: 'Driver ID and PIN are required' });
+    const userId = String(req.body.userId || '').trim().toUpperCase().slice(0, 30);
+    const pin = String(req.body.pin || '');
+    if (!userId || !pin) return res.status(400).json({ success: false, message: 'ID and PIN are required' });
+
+    const keyPerson = 'login|' + req.ip + '|' + userId, keyId = 'login|' + userId;
+    if (locked(keyPerson) || locked(keyId, 20)) {
+        return res.status(429).json({ success: false, message: 'Too many wrong tries. Please wait 15 minutes.' });
+    }
     try {
         const { data: user, error } = await supabase.from('users')
             .select('id, hashed_pin, role, full_name, plate').eq('id', userId).maybeSingle();
         if (error) throw error;
-        if (!user) return res.status(404).json({ success: false, message: 'Wrong ID or PIN' });
-
-        const stored = String(user.hashed_pin);
-        const valid = stored.startsWith('$2') ? await require('bcryptjs').compare(String(pin), stored) : stored === String(pin);
-        if (!valid) return res.status(401).json({ success: false, message: 'Wrong ID or PIN' });
-
+        const valid = user && /^\d{4}$/.test(pin) && (await checkPin(pin, user.hashed_pin));
+        if (!valid) {
+            addFail(keyPerson); addFail(keyId);
+            return res.status(401).json({ success: false, message: 'Wrong ID or PIN' });
+        }
+        fails.delete(keyPerson);
+        if (!String(user.hashed_pin).startsWith('scrypt$')) { // upgrade an old plain PIN to a hash
+            await supabase.from('users').update({ hashed_pin: await hashPin(pin) }).eq('id', user.id);
+        }
         const { data: wallet } = await supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle();
         res.json({
             success: true, authenticated: true,
@@ -104,37 +155,24 @@ app.post('/api/auth/verify-pin', async (req, res) => {
     } catch (err) { fail(res, err); }
 });
 
-/* ---------- Wallet top-up (DEMO ONLY: tied to a real payment or token in the next step) ---------- */
-app.post('/api/wallet/topup', async (req, res) => {
-    const { userId, amount } = req.body;
-    const value = Number(amount);
-    if (!userId || !(value > 0) || value > MAX_TOPUP) {
-        return res.status(400).json({ success: false, error: `Amount must be between R1 and R${MAX_TOPUP}` });
-    }
+/* ---------- Wallet: top up only with a one-time code ---------- */
+app.post('/api/wallet/redeem', auth('driver'), async (req, res) => {
+    const code = String(req.body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+    const key = 'redeem|' + req.user.id;
+    if (locked(key)) return res.status(429).json({ success: false, error: 'Too many wrong codes. Please wait 15 minutes.' });
     try {
-        const { data: wallet, error: fetchError } = await supabase.from('wallets').select('balance').eq('user_id', userId).maybeSingle();
-        if (fetchError) throw fetchError;
-        const newBalance = +((wallet ? Number(wallet.balance) : 0) + value).toFixed(2);
-        const { error: saveError } = await supabase.from('wallets')
-            .upsert({ user_id: userId, balance: newBalance, updated_at: new Date() }, { onConflict: 'user_id' });
-        if (saveError) throw saveError;
-        res.json({ success: true, balance: newBalance });
-    } catch (err) { fail(res, err); }
-});
-
-/* ---------- LEGACY dispatch used by the current terminal page (replaced in the next step) ---------- */
-app.post('/api/queue/dispatch', async (req, res) => {
-    const { route, taxiId, userId } = req.body;
-    if (!route || !taxiId || !userId) return res.status(400).json({ success: false, error: 'Route, fleet ID and user are required' });
-    try {
-        const c = await chargeWallet(userId, DISPATCH_FEE);
-        if (c.error) return res.status(c.status).json({ success: false, error: c.error, balance: c.balance });
-        const { error } = await supabase.from('dispatches').insert([{ route, taxi_id: taxiId, fee: DISPATCH_FEE, created_at: new Date() }]);
-        if (error) {
-            await supabase.from('wallets').update({ balance: c.previous }).eq('user_id', userId);
-            throw error;
+        const { data: t, error } = await supabase.from('topup_tokens')
+            .update({ used_by: req.user.id, used_at: new Date().toISOString() })
+            .eq('code', code).is('used_at', null).select().maybeSingle();
+        if (error) throw error;
+        if (!t) { addFail(key); return res.status(400).json({ success: false, error: 'That code is not valid or was already used' }); }
+        const c = await creditWallet(req.user.id, Number(t.amount));
+        if (c.error) {
+            await supabase.from('topup_tokens').update({ used_by: null, used_at: null }).eq('code', code); // give the code back
+            return res.status(c.status).json({ success: false, error: c.error });
         }
-        res.json({ success: true, message: 'Dispatch recorded successfully', balance: c.balance });
+        fails.delete(key);
+        res.json({ success: true, added: Number(t.amount), balance: c.balance });
     } catch (err) { fail(res, err); }
 });
 

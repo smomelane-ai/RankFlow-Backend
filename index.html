@@ -172,7 +172,7 @@ function driverView() {
     h += routeSelect('droute', S.droute, !!mine);
     h += '<div style="margin:10px 0">' + (mine ? '<button class="btn r wide" data-a="leave">Leave queue</button>' : gone ? '<button class="btn g wide" data-a="rejoin" data-v="' + gone.id + '">Rejoin queue</button>' : '<button class="btn g wide" data-a="checkin">Check into queue</button>') + '</div>';
     h += '<div class="card"><p class="lbl" style="margin:0">AVAILABLE WALLET BALANCE</p><div class="amt">' + rand(S.balance) + '</div><p class="mute" style="margin:2px 0 8px">R2.00 is taken when you accept a dispatch.</p>' +
-        '<div class="row"><input class="field" id="tu" type="number" inputmode="decimal" placeholder="Test top-up (R)" style="flex:1;margin:0"><button class="btn sm" data-a="topup">Top up</button></div></div>';
+        '<div class="row"><input class="field" id="tu" placeholder="Top-up code" autocapitalize="characters" autocomplete="off" style="flex:1;margin:0"><button class="btn sm" data-a="redeem">Redeem</button></div></div>';
     return h;
 }
 function render() {
@@ -232,6 +232,7 @@ function pinKey(v) {
 async function doLogin(id, pin) {
     const r = await api('POST', '/api/auth/verify-pin', { userId: id, pin });
     if (r.network) { toast('Cannot reach the server. Wait a minute and try again.'); return null; }
+    if (r.status === 429) { toast(r.data.message || 'Too many wrong tries. Please wait 15 minutes.'); return null; }
     if (r.status === 401 || r.status === 404) return false;
     if (!r.ok) { toast('Server error (' + r.status + ')'); return null; }
     S.user = r.data.user; S.token = r.data.token; S.balance = r.data.balance; S.err = ''; S.sig = '';
@@ -262,11 +263,11 @@ const A = {
     leave() { act('/api/queue/leave', {}); },
     async accept() { $('alertBox').className = ''; S.offerEnd = 0; const r = await act('/api/queue/accept', {}); if (r.ok && typeof r.data.balance === 'number') { S.balance = r.data.balance; save(); toast('Trip accepted. R2.00 fee taken.'); render(); } },
     reject() { $('alertBox').className = ''; S.offerEnd = 0; act('/api/queue/reject', {}, 'Moved to the back of the queue'); },
-    async topup() {
-        const v = Number($('tu').value); if (!(v > 0)) { toast('Enter an amount'); return; }
-        const r = await api('POST', '/api/wallet/topup', { userId: S.user.id, amount: v });
-        if (!r.ok) { toast(fail(r, 'Top-up failed')); return; }
-        S.balance = r.data.balance; save(); toast('Wallet topped up'); render();
+    async redeem() {
+        const code = $('tu').value.trim(); if (code.length < 6) { toast('Enter your top-up code'); return; }
+        const r = await api('POST', '/api/wallet/redeem', { code });
+        if (!r.ok) { toast(fail(r, 'Code not accepted')); return; }
+        S.balance = r.data.balance; save(); toast(rand(r.data.added) + ' added to your wallet'); render();
     },
     pk(v) { pinKey(v); },
     pcancel() { closePin(); }
