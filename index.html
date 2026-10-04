@@ -1,206 +1,290 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RankFlow - Taxi Logistics Engine</title>
-    <!-- Install-as-app (PWA) support -->
-    <link rel="manifest" href="manifest.webmanifest">
-    <meta name="theme-color" content="#111827">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="RankFlow">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <link rel="apple-touch-icon" href="icon-192.png">
-    <style>
-        body { font-family: sans-serif; background-color: #111827; color: #f3f4f6; padding: 20px; max-width: 600px; margin: 0 auto; }
-        .card { background-color: #1f2937; border: 1px solid #374151; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        input, select { width: 100%; padding: 10px; margin: 8px 0; background-color: #0f172a; color: white; border: 1px solid #374151; border-radius: 4px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; background-color: #f59e0b; color: #111827; border: none; font-weight: bold; border-radius: 4px; cursor: pointer; margin-top: 10px; }
-        button:hover { background-color: #d97706; }
-        button:disabled { opacity: .5; cursor: wait; }
-        .success-box { padding: 10px; background-color: #064e3b; color: #34d399; border-radius: 4px; margin-top: 10px; display: none; text-align: center; }
-        #offlineBar { display: none; background: #4c0519; color: #fecdd3; padding: 10px; border-radius: 6px; margin-bottom: 12px; text-align: center; font-weight: bold; }
-        .error-box { padding: 10px; background-color: #4c0519; color: #f43f5e; border-radius: 4px; margin-top: 10px; display: none; text-align: center; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RankFlow</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#111827">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="RankFlow">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#111827;--card:#1f2937;--line:#374151;--ink:#f3f4f6;--mute:#9ca3af;--g:#059669;--gd:#047857;--a:#f59e0b;--r:#dc2626}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4;padding-bottom:90px}
+button,input,select{font:inherit}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;border-bottom:2px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+.brand{font-weight:900;font-size:1.2rem}.brand b{color:var(--a)}
+main{max-width:980px;margin:0 auto;padding:14px}
+h2{margin:16px 0 8px;font-size:1.3rem}
+.mute{color:var(--mute);font-size:.9rem}
+#status{font-size:.8rem}
+#offlineBar{display:none;background:#4c0519;color:#fecdd3;padding:8px;text-align:center;font-weight:700}
+.card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:14px}
+.field{width:100%;padding:12px;margin:6px 0;background:#0f172a;color:var(--ink);border:2px solid var(--line);border-radius:10px;min-height:50px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:52px;padding:10px 18px;border:0;border-radius:12px;font-weight:800;font-size:1.05rem;cursor:pointer;color:#fff;background:#4b5563;box-shadow:0 4px 0 #1f2937;transition:transform .08s,box-shadow .08s;touch-action:manipulation}
+.btn:active{transform:translateY(4px);box-shadow:0 0 0 #000}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn:focus-visible,.field:focus-visible{outline:4px solid var(--a);outline-offset:2px}
+.btn.g{background:var(--g);box-shadow:0 4px 0 var(--gd)}.btn.a{background:var(--a);color:#111827;box-shadow:0 4px 0 #b45309}.btn.r{background:var(--r);box-shadow:0 4px 0 #991b1b}
+.btn.sm{min-height:44px;padding:6px 14px;font-size:.95rem}.btn.wide{width:100%}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.q{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--card);border:3px solid var(--line);border-radius:14px;padding:12px}
+.q.head{border-color:var(--g)}
+.num{width:58px;height:58px;border-radius:12px;background:var(--a);color:#111827;font-size:1.8rem;font-weight:900;display:flex;align-items:center;justify-content:center;flex:none}
+.info{flex:1;min-width:130px}.plate{font-size:1.2rem;font-weight:900}
+.tag{display:inline-block;padding:2px 10px;border-radius:8px;font-size:.8rem;font-weight:800;background:#064e3b;color:#34d399}
+.tag.Offered{background:#78350f;color:#fcd34d}.tag.Break{background:#4c0519;color:#fda4af}.tag.Dispatched{background:#374151;color:#d1d5db}
+.hero{background:#0b1220;border:3px solid var(--a);border-radius:20px;padding:20px;text-align:center;margin:12px 0}
+.big{font-size:5.5rem;font-weight:900;line-height:1;color:var(--a)}
+.lbl{letter-spacing:.15em;font-weight:800;font-size:.8rem;color:var(--mute)}
+.amt{font-size:2.4rem;font-weight:900}
+.banner{background:var(--r);color:#fff;font-weight:800;border-radius:10px;padding:10px;margin:10px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:10;min-height:60px;padding:0 24px}
+#toast{position:fixed;left:50%;top:12px;transform:translate(-50%,-160%);background:#fff;color:#111827;font-weight:800;padding:12px 18px;border-radius:10px;z-index:80;transition:transform .25s}
+#toast.on{transform:translate(-50%,0)}
+/* PIN pad */
+#pin{position:fixed;inset:0;background:rgba(2,6,23,.94);display:none;align-items:flex-end;justify-content:center;z-index:50}
+#pin.on{display:flex}
+.sheet{width:100%;max-width:420px;background:#0b1220;border-radius:28px 28px 0 0;padding:22px 18px calc(22px + env(safe-area-inset-bottom,0px));text-align:center;animation:up .28s ease-out}
+#pin.out .sheet{transform:translateY(110%);transition:transform .3s ease-in}
+.sheet.shake{animation:shake .45s}
+@keyframes up{from{transform:translateY(100%)}to{transform:none}}
+@keyframes shake{0%,100%{transform:none}20%{transform:translateX(-14px)}40%{transform:translateX(14px)}60%{transform:translateX(-10px)}80%{transform:translateX(10px)}}
+.deny{background:var(--r);color:#fff;font-weight:900;border-radius:10px;padding:10px;margin:0 0 12px;visibility:hidden}.deny.on{visibility:visible}
+.dots{display:flex;justify-content:center;gap:16px;margin:6px 0 18px}
+.dots i{width:22px;height:22px;border-radius:50%;border:3px solid #64748b}.dots i.f{background:#34d399;border-color:#34d399}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.key{min-height:68px;font-size:1.8rem;font-weight:900;border:0;border-radius:18px;background:#1e293b;color:#fff;box-shadow:0 5px 0 #020617;cursor:pointer;touch-action:manipulation}
+.key:active{transform:translateY(5px);box-shadow:0 0 0 #020617;background:#334155}.key.fn{background:#7c2d12;font-size:1.3rem}
+/* Dispatch alert */
+#alertBox{position:fixed;inset:0;background:#047857;color:#fff;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;z-index:70}
+#alertBox.on{display:flex}
+#alertSecs{font-size:7rem;font-weight:900;line-height:1}#alertSecs.low{color:#fcd34d}
+@media (prefers-reduced-motion:reduce){.sheet,.sheet.shake,#pin.out .sheet,#toast{animation:none;transition:none}}
+</style>
 </head>
 <body>
+<div id="offlineBar">You are offline. RankFlow needs a connection.</div>
+<header class="top"><span class="brand">Rank<b>Flow</b></span><span id="status" class="mute">Checking server...</span><span id="who"></span></header>
+<main id="app"></main>
+<div id="toast" role="status" aria-live="polite"></div>
 
-    <div id="offlineBar">You are offline. RankFlow needs a connection to log in and dispatch.</div>
-    <h1>RankFlow Live Terminal</h1>
-    <p id="serverStatus" style="color: #f59e0b;">● Server Status: Checking...</p>
+<div id="pin" role="dialog" aria-modal="true" aria-label="Security PIN">
+ <div class="sheet" id="sheet">
+  <p class="lbl">SECURITY PIN</p>
+  <p id="pdesc" style="font-size:1.15rem;font-weight:800;margin:6px 0 10px"></p>
+  <p class="deny" id="deny" role="alert">Access Denied: Wrong ID or PIN</p>
+  <div class="dots" id="dots"><i></i><i></i><i></i><i></i></div>
+  <div class="keys" id="keys"></div>
+  <button class="btn r wide" data-a="pcancel">Cancel</button>
+ </div>
+</div>
 
-    <!-- LOGIN SCREEN -->
-    <div id="authCard" class="card">
-        <h2>Driver Access Portal</h2>
-        <p style="color: #9ca3af; font-size: 14px;">Verify your system PIN to log in.</p>
+<div id="alertBox" role="alertdialog" aria-modal="true">
+ <p class="lbl" style="color:#d1fae5">DISPATCH ALERT</p>
+ <p id="alertPlate" style="font-size:1.4rem;font-weight:900;margin:0"></p>
+ <p id="alertSecs">30s</p>
+ <p class="mute" style="color:#d1fae5">A R2.00 rank fee is taken from your wallet when you accept.</p>
+ <div style="display:grid;gap:12px;width:100%;max-width:320px">
+  <button class="btn wide" style="background:#fff;color:#065f46;font-size:1.3rem" data-a="accept">ACCEPT TRIP</button>
+  <button class="btn r wide" style="font-size:1.3rem" data-a="reject">REJECT</button>
+ </div>
+</div>
 
-        <label>Driver ID / License Number</label>
-        <input type="text" id="driverIdInput" placeholder="e.g., DRV001">
+<script>
+const BACKEND_URL = "https://rankflow-backend-1.onrender.com";
+const ROUTES = ['Durban to Inanda', 'Durban to KwaMashu', 'Umlazi to CBD', 'Pinetown to KwaMashu'];
+const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const rand = (n) => 'R ' + Number(n).toFixed(2);
 
-        <label>Security PIN Code</label>
-        <input type="password" id="pinInput" placeholder="••••" maxlength="4" inputmode="numeric">
+const S = { user: null, token: '', balance: 0, route: ROUTES[0], droute: ROUTES[0], queue: [], recent: [], addOpen: false, err: '', uid: '', sig: '', offerEnd: 0, busy: false };
 
-        <button onclick="handleVerifyPin(this)">Verify Terminal access</button>
-        <div id="authMessage" class="error-box"></div>
-    </div>
+/* ---------- Server calls ---------- */
+async function api(method, path, body) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 70000); // a sleeping free server can take a minute
+    try {
+        const res = await fetch(BACKEND_URL + path, {
+            method, signal: ctl.signal,
+            headers: Object.assign({ 'Content-Type': 'application/json' }, S.token ? { Authorization: 'Bearer ' + S.token } : {}),
+            body: body ? JSON.stringify(body) : undefined
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401 && S.token && path !== '/api/auth/verify-pin') { logout('Your session ended. Please log in again.'); return { ok: false, status: 401, data }; }
+        return { ok: res.ok, status: res.status, data };
+    } catch (e) { return { ok: false, status: 0, data: {}, network: true }; }
+    finally { clearTimeout(timer); }
+}
+function toast(t) { const e = $('toast'); e.textContent = t; e.className = 'on'; clearTimeout(toast.t); toast.t = setTimeout(() => e.className = '', 2500); }
+function fail(r, fallback) { return r.network ? 'Cannot reach the server. Check your connection.' : (r.data.error || r.data.message || fallback || 'Something went wrong'); }
 
-    <!-- WORKSPACE -->
-    <div id="workspace" style="display: none;">
+async function checkServer() {
+    const el = $('status'); el.style.color = '#f59e0b'; el.textContent = 'Waking server...';
+    try { const r = await fetch(BACKEND_URL + '/health'); if (!r.ok) throw 0; el.style.color = '#10b981'; el.textContent = '● Connected'; }
+    catch (e) { el.style.color = '#f43f5e'; el.textContent = '● Cannot reach server'; }
+}
 
-        <div class="card" style="background-color: #111827; text-align: center; border: 2px solid #f59e0b;">
-            <h3 style="color: #9ca3af; margin: 0;">Available Commuter Balance</h3>
-            <p style="font-size: 40px; font-weight: bold; margin: 10px 0; color: white;" id="walletDisplay">R 0.00</p>
-            <p style="color: #f59e0b; font-size: 12px; margin: 0;">Standard R 2.00 deduction applies upon dispatch.</p>
-        </div>
+/* ---------- Session ---------- */
+function save() { sessionStorage.setItem('rf', JSON.stringify({ user: S.user, token: S.token, balance: S.balance, droute: S.droute, route: S.route })); }
+function logout(msg) {
+    S.user = null; S.token = ''; S.queue = []; S.recent = []; S.err = msg || ''; S.offerEnd = 0; $('alertBox').className = '';
+    sessionStorage.removeItem('rf'); render();
+}
 
-        <div class="card">
-            <h3>Top-Up Smart Wallet</h3>
-            <input type="number" id="topupAmount" placeholder="Amount (R)">
-            <button onclick="handleTopup(this)" style="background-color: #4b5563; color: white;">Load Funds</button>
-            <div id="walletMessage" class="success-box"></div>
-        </div>
+/* ---------- Views ---------- */
+function loginView() {
+    return '<div class="card" style="max-width:420px;margin:24px auto"><h2 style="margin-top:0">Driver and Manager Login</h2><p class="mute">Enter your ID, then your 4-digit PIN.</p>' +
+        '<input class="field" id="uid" placeholder="ID, e.g. DRV001" autocapitalize="characters" autocomplete="off" value="' + esc(S.uid) + '">' +
+        (S.err ? '<p class="banner" role="alert">' + esc(S.err) + '</p>' : '') +
+        '<button class="btn a wide" data-a="enterPin">Enter PIN</button></div>';
+}
+function routeSelect(id, sel, disabled) {
+    return '<label><b>Route</b><select class="field" id="' + id + '" data-a="' + id + '"' + (disabled ? ' disabled' : '') + '>' +
+        ROUTES.map((r) => '<option' + (r === sel ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>';
+}
+function managerView() {
+    const head = S.queue.find((e) => e.status === 'In Queue'), offered = S.queue.some((e) => e.status === 'Offered');
+    let h = routeSelect('mroute', S.route) + '<h2>Live Taxi Queue (' + S.queue.length + ')</h2>';
+    if (S.err) h += '<p class="banner" role="alert">' + esc(S.err) + '</p>';
+    if (S.addOpen) h += '<div class="card" style="margin:10px 0"><b>Add taxi to queue</b><input class="field" id="np" placeholder="Number plate, e.g. ND 123-456" autocapitalize="characters"><input class="field" id="nd" placeholder="Driver name (optional)"><div class="row"><button class="btn sm" data-a="addCancel">Cancel</button><button class="btn g sm" data-a="addOk">Add to queue</button></div></div>';
+    if (!S.queue.length) h += '<p class="mute">No taxis waiting on this route.</p>';
+    h += '<div class="grid">' + S.queue.map((e, i) =>
+        '<article class="q' + (e === head ? ' head' : '') + '"><div class="num">' + (i + 1) + '</div><div class="info"><div class="plate">' + esc(e.plate) + '</div><div class="mute">' + esc(e.driver_name) + '</div><span class="tag ' + e.status.replace(' ', '') + '">' + e.status + (e.status === 'Offered' ? ' · ' + e.secondsLeft + 's' : '') + '</span></div>' +
+        (e === head ? '<button class="btn g" data-a="dispatchNext"' + (offered || S.busy ? ' disabled' : '') + '>Dispatch Next</button>' : '') +
+        (e.status !== 'Offered' ? '<button class="btn a sm" data-a="brk" data-v="' + e.id + '">' + (e.status === 'Break' ? 'Back in queue' : 'Break') + '</button><button class="btn sm" data-a="remove" data-v="' + e.id + '">Remove</button>' : '') + '</article>').join('') + '</div>';
+    if (S.recent.length) h += '<h2>Dispatched</h2><div class="grid">' + S.recent.map((e) => '<article class="q"><div class="info"><div class="plate">' + esc(e.plate) + '</div><div class="mute">' + esc(e.driver_name) + '</div><span class="tag Dispatched">Dispatched</span></div><button class="btn sm" data-a="rejoin" data-v="' + e.id + '">Rejoin queue</button></article>').join('') + '</div>';
+    return h + '<button class="btn g fab" data-a="addOpen">+ Add Taxi</button>';
+}
+function driverView() {
+    const mine = S.queue.find((e) => e.driver_id === S.user.id), pos = mine ? S.queue.indexOf(mine) + 1 : 0;
+    const gone = !mine && S.recent.find((e) => e.driver_id === S.user.id);
+    let h = '';
+    if (mine) h += '<div class="hero"><p class="lbl">' + esc(mine.route.toUpperCase()) + '</p><p class="lbl">YOUR POSITION</p><div class="big">#' + pos + '</div><p>' + (pos === 1 ? 'You are next!' : (pos - 1) + ' taxi' + (pos > 2 ? 's' : '') + ' ahead of you') + '</p>' + (mine.status === 'Break' ? '<p class="banner" style="background:#b45309">On break. Your place is held.</p>' : '') + '</div>';
+    else if (gone) h += '<div class="hero"><p class="lbl">STATUS</p><div class="big" style="font-size:2.6rem">DISPATCHED</div><p>Safe trip, ' + esc(S.user.name) + '.</p></div>';
+    else h += '<div class="hero"><p class="lbl">YOUR POSITION</p><div class="big" style="font-size:2.4rem">NOT IN QUEUE</div></div>';
+    if (S.err) h += '<p class="banner" role="alert">' + esc(S.err) + '</p>';
+    h += routeSelect('droute', S.droute, !!mine);
+    h += '<div style="margin:10px 0">' + (mine ? '<button class="btn r wide" data-a="leave">Leave queue</button>' : gone ? '<button class="btn g wide" data-a="rejoin" data-v="' + gone.id + '">Rejoin queue</button>' : '<button class="btn g wide" data-a="checkin">Check into queue</button>') + '</div>';
+    h += '<div class="card"><p class="lbl" style="margin:0">AVAILABLE WALLET BALANCE</p><div class="amt">' + rand(S.balance) + '</div><p class="mute" style="margin:2px 0 8px">R2.00 is taken when you accept a dispatch.</p>' +
+        '<div class="row"><input class="field" id="tu" type="number" inputmode="decimal" placeholder="Test top-up (R)" style="flex:1;margin:0"><button class="btn sm" data-a="topup">Top up</button></div></div>';
+    return h;
+}
+function render() {
+    $('who').innerHTML = S.user ? '<span class="mute">' + esc(S.user.name || S.user.id) + ' · ' + S.user.role + '</span> <button class="btn sm" data-a="logout">Log out</button>' : '';
+    $('app').innerHTML = !S.user ? loginView() : S.user.role === 'manager' ? managerView() : driverView();
+}
+function softRender() { const t = document.activeElement && document.activeElement.tagName; if (t === 'INPUT' || t === 'SELECT') return; render(); }
 
-        <div class="card">
-            <h2>Log Active Queue Dispatch</h2>
-            <label>Select Transit Route</label>
-            <select id="routeSelect">
-                <option value="Durban to Inanda">Durban to Inanda</option>
-                <option value="Umlazi to CBD">Umlazi to CBD</option>
-                <option value="Pinetown to KwaMashu">Pinetown to KwaMashu</option>
-            </select>
+/* ---------- Queue polling ---------- */
+async function fetchQueue() {
+    if (!S.user) return;
+    const r = await api('GET', '/api/queue?route=' + encodeURIComponent(S.user.role === 'manager' ? S.route : S.droute));
+    if (!r.ok || !S.user) return;
+    S.queue = r.data.queue || []; S.recent = r.data.recent || [];
+    handleOffer();
+    const sig = JSON.stringify([S.queue, S.recent, S.err, S.addOpen]);
+    if (sig !== S.sig) { S.sig = sig; softRender(); }
+}
+setInterval(() => { if (S.user && !document.hidden) fetchQueue(); }, 2500);
 
-            <label>Taxi Vehicle Fleet ID</label>
-            <input type="text" id="taxiIdInput" placeholder="e.g., ND-887-231">
+function handleOffer() {
+    const me = S.user && S.user.role === 'driver' ? S.queue.find((e) => e.driver_id === S.user.id && e.status === 'Offered') : null;
+    if (me) {
+        const end = Date.now() + me.secondsLeft * 1000;
+        if (!S.offerEnd || Math.abs(end - S.offerEnd) > 2000) S.offerEnd = end;
+        $('alertPlate').textContent = me.plate + ' · ' + me.route;
+        $('alertBox').className = 'on'; tickAlert();
+    } else { S.offerEnd = 0; $('alertBox').className = ''; }
+}
+function tickAlert() {
+    const s = Math.max(0, Math.ceil((S.offerEnd - Date.now()) / 1000));
+    $('alertSecs').textContent = s + 's'; $('alertSecs').className = s <= 10 ? 'low' : '';
+    if (s <= 0 && S.offerEnd) { S.offerEnd = 0; $('alertBox').className = ''; fetchQueue(); }
+}
+setInterval(() => { if (S.offerEnd) tickAlert(); }, 250);
 
-            <button onclick="handleDispatch(this)" style="background-color: #059669; color: white;">Confirm Dispatch Logs</button>
-            <div id="dispatchMessage" class="success-box"></div>
-        </div>
+/* ---------- PIN pad ---------- */
+let pinValue = '', pinSubmit = null, pinBusy = false;
+$('keys').innerHTML = ['1','2','3','4','5','6','7','8','9','C','0','⌫'].map((k) => '<button class="key' + (k === 'C' || k === '⌫' ? ' fn' : '') + '" data-a="pk" data-v="' + k + '" aria-label="' + (k === 'C' ? 'Clear' : k === '⌫' ? 'Backspace' : k) + '">' + k + '</button>').join('');
+function dots() { const d = $('dots').children; for (let i = 0; i < 4; i++) d[i].className = i < pinValue.length ? 'f' : ''; }
+function openPin(title, submit) { pinValue = ''; pinSubmit = submit; pinBusy = false; $('pdesc').textContent = title; $('deny').className = 'deny'; dots(); $('pin').className = 'on'; }
+function closePin() { $('pin').className = 'on out'; setTimeout(() => { $('pin').className = ''; }, 300); pinSubmit = null; }
+function pinKey(v) {
+    if (pinBusy || !pinSubmit) return;
+    if (v === 'C') pinValue = ''; else if (v === '⌫') pinValue = pinValue.slice(0, -1); else if (pinValue.length < 4) pinValue += v;
+    $('deny').className = 'deny'; dots();
+    if (pinValue.length === 4) { pinBusy = true; setTimeout(async () => {
+        const ok = await pinSubmit(pinValue);
+        if (ok === true) return closePin();
+        const sh = $('sheet'); sh.classList.remove('shake'); void sh.offsetWidth; sh.classList.add('shake');
+        if (ok === false) $('deny').className = 'deny on';
+        pinValue = ''; pinBusy = false; dots();
+    }, 150); }
+}
 
-    </div>
+/* ---------- Login ---------- */
+async function doLogin(id, pin) {
+    const r = await api('POST', '/api/auth/verify-pin', { userId: id, pin });
+    if (r.network) { toast('Cannot reach the server. Wait a minute and try again.'); return null; }
+    if (r.status === 401 || r.status === 404) return false;
+    if (!r.ok) { toast('Server error (' + r.status + ')'); return null; }
+    S.user = r.data.user; S.token = r.data.token; S.balance = r.data.balance; S.err = ''; S.sig = '';
+    if (S.user.role === 'manager' || !S.droute) S.droute = ROUTES[0];
+    save(); render(); fetchQueue();
+    return true;
+}
 
-    <script>
-        // Must be the exact URL shown at the top of your backend service in the Render dashboard.
-        const BACKEND_URL = "https://rankflow-backend-1.onrender.com";
-        let activeUserId = "";
-        const $ = (id) => document.getElementById(id);
+/* ---------- Actions ---------- */
+async function act(path, body, okMsg) {
+    S.err = ''; const r = await api('POST', path, body);
+    if (!r.ok) { S.err = fail(r); render(); return r; }
+    if (okMsg) toast(okMsg);
+    await fetchQueue(); render(); return r;
+}
+const A = {
+    enterPin() { const id = $('uid').value.trim().toUpperCase(); S.uid = id; if (!id) { S.err = 'Enter your ID first'; render(); return; } S.err = ''; openPin('PIN for ' + id, (pin) => doLogin(id, pin)); },
+    logout() { logout(''); },
+    mroute() { S.route = $('mroute').value; S.sig = ''; save(); fetchQueue(); },
+    droute() { S.droute = $('droute').value; S.sig = ''; save(); fetchQueue(); },
+    async dispatchNext() { S.busy = true; render(); await act('/api/queue/dispatch-next', { route: S.route }); S.busy = false; render(); },
+    addOpen() { S.addOpen = true; render(); }, addCancel() { S.addOpen = false; render(); },
+    async addOk() { const plate = $('np').value.trim(); if (plate.length < 4) { toast('Enter the number plate'); return; } S.addOpen = false; await act('/api/queue/join', { route: S.route, plate, driverName: $('nd').value.trim() }); },
+    brk(v) { act('/api/queue/break', { id: Number(v) }); },
+    remove(v) { act('/api/queue/remove', { id: Number(v) }); },
+    rejoin(v) { act('/api/queue/rejoin', { id: Number(v) }); },
+    checkin() { act('/api/queue/join', { route: S.droute }, 'You are in the queue'); },
+    leave() { act('/api/queue/leave', {}); },
+    async accept() { $('alertBox').className = ''; S.offerEnd = 0; const r = await act('/api/queue/accept', {}); if (r.ok && typeof r.data.balance === 'number') { S.balance = r.data.balance; save(); toast('Trip accepted. R2.00 fee taken.'); render(); } },
+    reject() { $('alertBox').className = ''; S.offerEnd = 0; act('/api/queue/reject', {}, 'Moved to the back of the queue'); },
+    async topup() {
+        const v = Number($('tu').value); if (!(v > 0)) { toast('Enter an amount'); return; }
+        const r = await api('POST', '/api/wallet/topup', { userId: S.user.id, amount: v });
+        if (!r.ok) { toast(fail(r, 'Top-up failed')); return; }
+        S.balance = r.data.balance; save(); toast('Wallet topped up'); render();
+    },
+    pk(v) { pinKey(v); },
+    pcancel() { closePin(); }
+};
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-a]'); if (b && b.tagName !== 'SELECT' && A[b.dataset.a]) A[b.dataset.a](b.dataset.v); });
+document.addEventListener('change', (e) => { const b = e.target.closest('select[data-a]'); if (b) A[b.dataset.a](); });
+document.addEventListener('input', (e) => { if (e.target.id === 'uid') S.uid = e.target.value; });
+document.addEventListener('keydown', (e) => {
+    if ($('pin').className.indexOf('on') > -1) { if (/^[0-9]$/.test(e.key)) pinKey(e.key); else if (e.key === 'Backspace') pinKey('⌫'); else if (e.key === 'Escape') closePin(); }
+    else if (e.key === 'Enter' && !S.user && e.target.id === 'uid') A.enterPin();
+});
 
-        // Show a green (ok) or red (error) message in a message box
-        function say(id, text, ok) {
-            const el = $(id);
-            el.className = ok ? 'success-box' : 'error-box';
-            el.innerText = text;
-            el.style.display = 'block';
-        }
-
-        // POST helper: waits up to 70s (Render free plan can be asleep) and never throws
-        async function api(path, body) {
-            const ctl = new AbortController();
-            const timer = setTimeout(() => ctl.abort(), 70000);
-            try {
-                const res = await fetch(BACKEND_URL + path, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                    signal: ctl.signal
-                });
-                const data = await res.json().catch(() => ({}));
-                return { ok: res.ok, status: res.status, data };
-            } catch (e) {
-                return { ok: false, status: 0, data: {}, network: true };
-            } finally {
-                clearTimeout(timer);
-            }
-        }
-
-        // Real server status (needs the GET /health route on the backend)
-        async function checkServer() {
-            const el = $('serverStatus');
-            el.style.color = '#f59e0b';
-            el.innerText = '● Server Status: Waking up (can take up to 60 seconds)...';
-            const ctl = new AbortController();
-            const timer = setTimeout(() => ctl.abort(), 70000);
-            try {
-                const r = await fetch(BACKEND_URL + '/health', { signal: ctl.signal });
-                if (!r.ok) throw new Error('bad status');
-                el.style.color = '#10b981';
-                el.innerText = '● Server Status: Connected';
-            } catch (e) {
-                el.style.color = '#f43f5e';
-                el.innerText = '● Server Status: Cannot reach server (check the backend URL)';
-            } finally {
-                clearTimeout(timer);
-            }
-        }
-        checkServer();
-
-        // Offline banner
-        function updateOnline() { $('offlineBar').style.display = navigator.onLine ? 'none' : 'block'; }
-        window.addEventListener('online', () => { updateOnline(); checkServer(); });
-        window.addEventListener('offline', updateOnline);
-        updateOnline();
-
-        // Register the service worker so the page can be installed and opens fast
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
-        }
-
-        async function handleVerifyPin(btn) {
-            const userId = $('driverIdInput').value.trim();
-            const pin = $('pinInput').value.trim();
-            $('authMessage').style.display = 'none';
-
-            if (!userId || !pin) { say('authMessage', 'Please fill in both Driver ID and PIN', false); return; }
-
-            btn.disabled = true;
-            const r = await api('/api/auth/verify-pin', { userId, pin });
-            btn.disabled = false;
-
-            if (r.network) return say('authMessage', 'Cannot reach the server. Wait 60 seconds if it was asleep, then try again.', false);
-            if (r.status === 401 || r.status === 404) return say('authMessage', r.data.message || 'Wrong ID or PIN', false);
-            if (!r.ok) return say('authMessage', 'Server error (' + r.status + ')', false);
-
-            activeUserId = userId;
-            $('authCard').style.display = 'none';
-            $('workspace').style.display = 'block';
-            $('walletDisplay').innerText = 'R ' + parseFloat(r.data.balance).toFixed(2);
-        }
-
-        async function handleTopup(btn) {
-            const amount = $('topupAmount').value;
-            $('walletMessage').style.display = 'none';
-            if (!amount || amount <= 0) { say('walletMessage', 'Enter a valid amount', false); return; }
-
-            btn.disabled = true;
-            const r = await api('/api/wallet/topup', { userId: activeUserId, amount });
-            btn.disabled = false;
-
-            if (r.network) return say('walletMessage', 'Network error during top-up. Try again.', false);
-            if (!r.ok || !r.data.success) return say('walletMessage', r.data.error || r.data.message || 'Top-up failed (' + r.status + ')', false);
-
-            $('walletDisplay').innerText = 'R ' + parseFloat(r.data.balance).toFixed(2);
-            say('walletMessage', 'Funds successfully deposited into cloud ledger.', true);
-            $('topupAmount').value = '';
-        }
-
-        async function handleDispatch(btn) {
-            const route = $('routeSelect').value;
-            const taxiId = $('taxiIdInput').value.trim();
-            $('dispatchMessage').style.display = 'none';
-            if (!taxiId) { say('dispatchMessage', 'Please provide a Fleet ID', false); return; }
-
-            btn.disabled = true; // stops double-tap logging the same dispatch twice
-            const r = await api('/api/queue/dispatch', { route, taxiId, userId: activeUserId });
-            btn.disabled = false;
-
-            if (r.network) return say('dispatchMessage', 'Server synchronization error. Try again.', false);
-            if (!r.ok || !r.data.success) return say('dispatchMessage', r.data.error || r.data.message || 'Dispatch failed (' + r.status + ')', false);
-
-            // The server should return the new balance once it deducts the R2.00 fee
-            if (typeof r.data.balance === 'number') $('walletDisplay').innerText = 'R ' + r.data.balance.toFixed(2);
-            say('dispatchMessage', 'Success! Fleet ' + taxiId + ' dispatched on ' + route + '.', true);
-            $('taxiIdInput').value = '';
-        }
-    </script>
+/* ---------- Start ---------- */
+function updateOnline() { $('offlineBar').style.display = navigator.onLine ? 'none' : 'block'; }
+window.addEventListener('online', () => { updateOnline(); checkServer(); }); window.addEventListener('offline', updateOnline); updateOnline();
+try { const s = JSON.parse(sessionStorage.getItem('rf') || 'null'); if (s && s.token) { S.user = s.user; S.token = s.token; S.balance = s.balance; S.droute = s.droute || ROUTES[0]; S.route = s.route || ROUTES[0]; } } catch (e) {}
+render(); checkServer(); fetchQueue();
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+</script>
 </body>
 </html>
