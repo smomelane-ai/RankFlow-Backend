@@ -44,6 +44,13 @@ h2{margin:16px 0 8px;font-size:1.3rem}
 .amt{font-size:2.4rem;font-weight:900}
 .banner{background:var(--r);color:#fff;font-weight:800;border-radius:10px;padding:10px;margin:10px 0}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.form{display:grid;gap:8px;max-width:520px}
+.ok{background:#064e3b;border:2px solid var(--g);border-radius:12px;padding:12px;margin:10px 0;font-weight:700}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;user-select:all}
+.line{display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding:8px 0;flex-wrap:wrap}
+.wk{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:8px;text-align:center}
+.wk div{background:#0f172a;border-radius:8px;padding:4px 0;font-size:.8rem}.wk b{display:block;font-size:1.1rem;color:var(--a)}
 .fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:10;min-height:60px;padding:0 24px}
 #toast{position:fixed;left:50%;top:12px;transform:translate(-50%,-160%);background:#fff;color:#111827;font-weight:800;padding:12px 18px;border-radius:10px;z-index:80;transition:transform .25s}
 #toast.on{transform:translate(-50%,0)}
@@ -103,7 +110,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const rand = (n) => 'R ' + Number(n).toFixed(2);
 
-const S = { user: null, token: '', balance: 0, route: ROUTES[0], droute: ROUTES[0], queue: [], recent: [], addOpen: false, err: '', uid: '', sig: '', offerEnd: 0, busy: false };
+const S = { user: null, token: '', balance: 0, route: ROUTES[0], droute: ROUTES[0], queue: [], recent: [], addOpen: false, err: '', uid: '', sig: '', offerEnd: 0, busy: false, od: '', odata: null, tab: 'users', ausers: [], abatches: [], apays: [], aout: '' };
 
 /* ---------- Server calls ---------- */
 async function api(method, path, body) {
@@ -175,15 +182,72 @@ function driverView() {
         '<div class="row"><input class="field" id="tu" placeholder="Top-up code" autocapitalize="characters" autocomplete="off" style="flex:1;margin:0"><button class="btn sm" data-a="redeem">Redeem</button></div></div>';
     return h;
 }
+/* ---------- Owner dashboard ---------- */
+const SAST = 2 * 3600 * 1000;
+const dayStr = (ms) => new Date(ms + SAST).toISOString().slice(0, 10);
+const shiftDay = (d, n) => dayStr(new Date(d + 'T12:00:00+02:00').getTime() + n * 86400000);
+const niceDate = (d) => new Date(d + 'T12:00:00+02:00').toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Africa/Johannesburg' });
+const clock = (iso) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Johannesburg' });
+async function fetchOwner() {
+    if (!S.user || S.user.role !== 'owner') return;
+    if (!S.od) S.od = dayStr(Date.now());
+    const r = await api('GET', '/api/owner/summary?date=' + S.od);
+    if (r.ok) { S.odata = r.data; render(); } else toast(fail(r, 'Could not load trips'));
+}
+function ownerView() {
+    const d = S.odata;
+    let h = '<h2 style="margin-top:0">Trips accepted</h2><div class="row"><button class="btn sm" data-a="oPrev">&#9664; Day before</button><input class="field" type="date" id="odate" value="' + esc(S.od) + '" style="width:auto;margin:0"><button class="btn sm" data-a="oNext">Next day &#9654;</button><button class="btn a sm" data-a="oToday">Today</button><button class="btn sm" data-a="oRefresh">Refresh</button></div>';
+    if (!d) return h + '<p class="mute">Loading...</p>';
+    h += '<div class="hero"><p class="lbl">ALL YOUR DRIVERS · ' + esc(niceDate(d.date)).toUpperCase() + '</p><div class="big">' + d.total + '</div><p>trips accepted through RankFlow</p></div>';
+    if (!d.drivers.length) h += '<p class="mute">No drivers are linked to you yet. Ask RankFlow to link your drivers to your ID.</p>';
+    h += '<p class="mute">Only trips accepted in RankFlow are counted. Use these numbers to check your driver\'s day against the cash he hands in.</p><div class="grid">' + d.drivers.map((x) => {
+        const cells = [6, 5, 4, 3, 2, 1, 0].map((n) => { const k = shiftDay(d.date, -n); return '<div>' + new Date(k + 'T12:00:00+02:00').toLocaleDateString('en-ZA', { weekday: 'short', timeZone: 'Africa/Johannesburg' }) + '<b>' + (x.week[k] || 0) + '</b></div>'; }).join('');
+        return '<article class="card"><b>' + esc(x.name) + '</b> <span class="mute">' + esc(x.plate) + '</span><div class="amt">' + x.trips + ' trip' + (x.trips === 1 ? '' : 's') + '</div><p class="mute" style="margin:0 0 6px">Rank fees paid: ' + rand(x.fees) + '</p>' +
+            (x.list.length ? x.list.map((t) => '<div class="line"><span>' + clock(t.time) + '</span><span class="mute">' + esc(t.route) + '</span></div>').join('') : '<p class="mute">No trips this day.</p>') +
+            '<p class="lbl" style="margin:10px 0 0">LAST 7 DAYS</p><div class="wk">' + cells + '</div></article>';
+    }).join('') + '</div>';
+    return h;
+}
+
+/* ---------- Admin (you only) ---------- */
+async function fetchAdmin() {
+    if (!S.user || S.user.role !== 'admin') return;
+    const [u, b, p] = await Promise.all([api('GET', '/api/admin/users'), api('GET', '/api/admin/batches'), api('GET', '/api/admin/payments')]);
+    if (u.ok) S.ausers = u.data.users; if (b.ok) S.abatches = b.data.batches; if (p.ok) S.apays = p.data.payments;
+    if (!u.ok) toast(fail(u, 'Could not load')); render();
+}
+function adminView() {
+    const tabs = [['users', 'Drivers and owners'], ['codes', 'Top-up codes'], ['pay', 'Confirm a payment']];
+    let h = '<div class="tabs">' + tabs.map((t) => '<button class="btn sm' + (S.tab === t[0] ? ' a' : '') + '" data-a="atab" data-v="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
+    if (S.aout) h += '<div class="ok">' + S.aout + '<div style="margin-top:8px"><button class="btn sm" data-a="aclear">Done, hide this</button></div></div>';
+    if (S.tab === 'users') {
+        h += '<h2 style="margin-top:0">Add someone</h2><div class="form"><select class="field" id="arole"><option value="driver">Driver</option><option value="owner">Owner</option><option value="manager">Rank manager</option></select>' +
+            '<input class="field" id="aid" placeholder="ID, e.g. DRV002" autocapitalize="characters"><input class="field" id="aname" placeholder="Full name"><input class="field" id="aplate" placeholder="Number plate (drivers only)" autocapitalize="characters">' +
+            '<input class="field" id="aowner" placeholder="Owner ID (drivers, optional), e.g. OWN001" autocapitalize="characters"><input class="field" id="apin" inputmode="numeric" maxlength="4" placeholder="4-digit PIN (leave empty to make one)">' +
+            '<button class="btn g" data-a="aCreate">Create</button></div><h2>Everyone</h2>' +
+            S.ausers.map((u) => '<div class="line"><span><b>' + esc(u.id) + '</b> ' + esc(u.full_name) + ' <span class="mute">' + u.role + (u.plate ? ' · ' + esc(u.plate) : '') + (u.owner_id ? ' · owner ' + esc(u.owner_id) : '') + '</span></span><span>' + (u.balance == null ? '' : rand(u.balance)) + (u.role !== 'admin' ? ' <button class="btn sm" data-a="aReset" data-v="' + esc(u.id) + '">New PIN</button>' : '') + '</span></div>').join('');
+    } else if (S.tab === 'codes') {
+        h += '<h2 style="margin-top:0">Make top-up codes</h2><p class="mute">Create codes only after the seller has paid you. Each code works once.</p><div class="form"><input class="field" id="cseller" placeholder="Seller\'s name"><input class="field" id="camt" type="number" inputmode="decimal" placeholder="Value of each code (R)"><input class="field" id="ccount" type="number" inputmode="numeric" placeholder="How many codes"><input class="field" id="cref" placeholder="Bank reference of their payment"><button class="btn g" data-a="cCreate">Make codes</button></div><h2>Recent batches</h2>' +
+            (S.abatches.length ? S.abatches.map((b) => { const unused = b.codes.filter((c) => !c.used_at).length;
+                return '<details class="card" style="margin-bottom:8px"><summary><b>' + esc(b.seller) + '</b> · ' + b.quantity + ' × ' + rand(b.amount) + ' · <span class="mute">' + unused + ' unused · ' + new Date(b.created_at).toLocaleDateString('en-ZA') + (b.reference ? ' · ' + esc(b.reference) : '') + '</span></summary>' +
+                    b.codes.map((c) => '<div class="line"><span class="mono">' + esc(c.code) + '</span><span class="mute">' + (c.used_at ? 'used by ' + esc(c.used_by) : 'unused') + '</span></div>').join('') + '</details>'; }).join('') : '<p class="mute">No codes made yet.</p>');
+    } else {
+        h += '<h2 style="margin-top:0">Confirm a payment</h2><p class="mute">Only add money you can already see in your bank account.</p><div class="form"><input class="field" id="puser" list="drv" placeholder="Driver ID" autocapitalize="characters"><datalist id="drv">' + S.ausers.filter((u) => u.role === 'driver').map((u) => '<option value="' + esc(u.id) + '">' + esc(u.full_name) + '</option>').join('') + '</datalist>' +
+            '<input class="field" id="pamt" type="number" inputmode="decimal" placeholder="Amount (R)"><select class="field" id="pmeth"><option>PayShap</option><option>EFT</option><option>eWallet</option><option>Cash</option></select><input class="field" id="pref" placeholder="Bank reference (not needed for cash)"><button class="btn g" data-a="pCreate">Add to wallet</button></div><h2>Recent payments</h2>' +
+            (S.apays.length ? S.apays.map((p) => '<div class="line"><span><b>' + esc(p.user_id) + '</b> ' + esc(p.method) + (p.reference ? ' · ' + esc(p.reference) : '') + '<br><span class="mute">' + new Date(p.created_at).toLocaleString('en-ZA') + '</span></span><b>' + rand(p.amount) + '</b></div>').join('') : '<p class="mute">No payments yet.</p>');
+    }
+    return h;
+}
+
 function render() {
     $('who').innerHTML = S.user ? '<span class="mute">' + esc(S.user.name || S.user.id) + ' · ' + S.user.role + '</span> <button class="btn sm" data-a="logout">Log out</button>' : '';
-    $('app').innerHTML = !S.user ? loginView() : S.user.role === 'manager' ? managerView() : driverView();
+    $('app').innerHTML = !S.user ? loginView() : S.user.role === 'manager' ? managerView() : S.user.role === 'owner' ? ownerView() : S.user.role === 'admin' ? adminView() : driverView();
 }
 function softRender() { const t = document.activeElement && document.activeElement.tagName; if (t === 'INPUT' || t === 'SELECT') return; render(); }
 
 /* ---------- Queue polling ---------- */
 async function fetchQueue() {
-    if (!S.user) return;
+    if (!S.user || !['manager', 'driver'].includes(S.user.role)) return;
     const r = await api('GET', '/api/queue?route=' + encodeURIComponent(S.user.role === 'manager' ? S.route : S.droute));
     if (!r.ok || !S.user) return;
     S.queue = r.data.queue || []; S.recent = r.data.recent || [];
@@ -237,7 +301,7 @@ async function doLogin(id, pin) {
     if (!r.ok) { toast('Server error (' + r.status + ')'); return null; }
     S.user = r.data.user; S.token = r.data.token; S.balance = r.data.balance; S.err = ''; S.sig = '';
     if (S.user.role === 'manager' || !S.droute) S.droute = ROUTES[0];
-    save(); render(); fetchQueue();
+    save(); render(); fetchQueue(); fetchOwner(); fetchAdmin();
     return true;
 }
 
@@ -269,11 +333,31 @@ const A = {
         if (!r.ok) { toast(fail(r, 'Code not accepted')); return; }
         S.balance = r.data.balance; save(); toast(rand(r.data.added) + ' added to your wallet'); render();
     },
+    oPrev() { S.od = shiftDay(S.od, -1); fetchOwner(); }, oNext() { S.od = shiftDay(S.od, 1); fetchOwner(); },
+    oToday() { S.od = dayStr(Date.now()); fetchOwner(); }, oRefresh() { fetchOwner(); },
+    atab(v) { S.tab = v; S.aout = ''; render(); }, aclear() { S.aout = ''; render(); },
+    async aCreate() {
+        const body = { role: $('arole').value, id: $('aid').value, name: $('aname').value, plate: $('aplate').value, ownerId: $('aowner').value, pin: $('apin').value };
+        const r = await api('POST', '/api/admin/users', body); if (!r.ok) { toast(fail(r)); return; }
+        S.aout = 'Created ' + esc(r.data.name) + ' (' + r.data.role + '). ID: <span class="mono">' + esc(r.data.id) + '</span> PIN: <span class="mono">' + esc(r.data.pin) + '</span><br><span class="mute">Give them this now. The PIN is not shown again.</span>'; fetchAdmin();
+    },
+    async aReset(v) {
+        const r = await api('POST', '/api/admin/reset-pin', { id: v }); if (!r.ok) { toast(fail(r)); return; }
+        S.aout = 'New PIN for <b>' + esc(r.data.id) + '</b>: <span class="mono">' + esc(r.data.pin) + '</span><br><span class="mute">Give it to them now. It is not shown again.</span>'; render();
+    },
+    async cCreate() {
+        const r = await api('POST', '/api/admin/codes', { seller: $('cseller').value, amount: $('camt').value, count: $('ccount').value, reference: $('cref').value }); if (!r.ok) { toast(fail(r)); return; }
+        S.aout = r.data.codes.length + ' codes of ' + rand(r.data.batch.amount) + ' for ' + esc(r.data.batch.seller) + ':<div class="mono" style="margin-top:6px">' + r.data.codes.map(esc).join('<br>') + '</div>'; fetchAdmin();
+    },
+    async pCreate() {
+        const r = await api('POST', '/api/admin/payments', { userId: $('puser').value, amount: $('pamt').value, method: $('pmeth').value, reference: $('pref').value }); if (!r.ok) { toast(fail(r)); return; }
+        S.aout = 'Added. The wallet now holds ' + rand(r.data.balance) + '.'; fetchAdmin();
+    },
     pk(v) { pinKey(v); },
     pcancel() { closePin(); }
 };
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-a]'); if (b && b.tagName !== 'SELECT' && A[b.dataset.a]) A[b.dataset.a](b.dataset.v); });
-document.addEventListener('change', (e) => { const b = e.target.closest('select[data-a]'); if (b) A[b.dataset.a](); });
+document.addEventListener('change', (e) => { if (e.target.id === 'odate' && e.target.value) { S.od = e.target.value; fetchOwner(); return; } const b = e.target.closest('select[data-a]'); if (b) A[b.dataset.a](); });
 document.addEventListener('input', (e) => { if (e.target.id === 'uid') S.uid = e.target.value; });
 document.addEventListener('keydown', (e) => {
     if ($('pin').className.indexOf('on') > -1) { if (/^[0-9]$/.test(e.key)) pinKey(e.key); else if (e.key === 'Backspace') pinKey('⌫'); else if (e.key === 'Escape') closePin(); }
@@ -284,7 +368,7 @@ document.addEventListener('keydown', (e) => {
 function updateOnline() { $('offlineBar').style.display = navigator.onLine ? 'none' : 'block'; }
 window.addEventListener('online', () => { updateOnline(); checkServer(); }); window.addEventListener('offline', updateOnline); updateOnline();
 try { const s = JSON.parse(sessionStorage.getItem('rf') || 'null'); if (s && s.token) { S.user = s.user; S.token = s.token; S.balance = s.balance; S.droute = s.droute || ROUTES[0]; S.route = s.route || ROUTES[0]; } } catch (e) {}
-render(); checkServer(); fetchQueue();
+render(); checkServer(); fetchQueue(); fetchOwner(); fetchAdmin();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 </script>
 </body>

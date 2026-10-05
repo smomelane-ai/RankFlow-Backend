@@ -267,7 +267,7 @@ app.post('/api/queue/accept', auth('driver'), async (req, res) => {
         }
         const c = await chargeWallet(req.user.id, DISPATCH_FEE);
         if (c.error) return res.status(c.status).json({ success: false, error: c.error, balance: c.balance });
-        const { error } = await supabase.from('dispatches').insert([{ route: e.route, taxi_id: e.plate, fee: DISPATCH_FEE, created_at: new Date() }]);
+        const { error } = await supabase.from('dispatches').insert([{ route: e.route, taxi_id: e.plate, driver_id: req.user.id, fee: DISPATCH_FEE, created_at: new Date() }]);
         if (error) {
             await supabase.from('wallets').update({ balance: c.previous }).eq('user_id', req.user.id);
             throw error;
@@ -314,6 +314,161 @@ app.post('/api/queue/rejoin', auth(), async (req, res) => {
         if (req.user.role === 'driver' && e.driver_id !== req.user.id) return res.status(403).json({ success: false, error: 'Not your taxi' });
         await supabase.from('queue_entries').update({ status: 'In Queue', joined_at: new Date().toISOString(), offered_at: null }).eq('id', e.id);
         res.json({ success: true });
+    } catch (err) { fail(res, err); }
+});
+
+/* ---------- Admin (you only) ---------- */
+const adminOnly = auth('admin');
+const randomPin = () => String(crypto.randomInt(0, 10000)).padStart(4, '0');
+const bad = (res, msg) => res.status(400).json({ success: false, error: msg });
+
+// Everyone on the system, with wallet balances
+app.get('/api/admin/users', adminOnly, async (req, res) => {
+    try {
+        const { data: users, error } = await supabase.from('users')
+            .select('id, role, full_name, plate, owner_id, created_at').order('created_at', { ascending: true });
+        if (error) throw error;
+        const { data: w } = await supabase.from('wallets').select('user_id, balance');
+        const bal = Object.fromEntries((w || []).map((x) => [x.user_id, Number(x.balance)]));
+        res.json({ success: true, users: users.map((u) => ({ ...u, balance: bal[u.id] ?? null })) });
+    } catch (err) { fail(res, err); }
+});
+
+// Create a driver, owner or rank manager. The PIN is shown to you once.
+app.post('/api/admin/users', adminOnly, async (req, res) => {
+    const id = String(req.body.id || '').trim().toUpperCase();
+    const role = req.body.role, name = String(req.body.name || '').trim().slice(0, 60);
+    const plate = cleanPlate(req.body.plate);
+    const ownerId = String(req.body.ownerId || '').trim().toUpperCase() || null;
+    let pin = String(req.body.pin || '');
+    if (!/^[A-Z0-9]{3,12}$/.test(id)) return bad(res, 'The ID must be 3 to 12 letters or numbers');
+    if (!['driver', 'owner', 'manager'].includes(role)) return bad(res, 'Choose driver, owner or manager');
+    if (!name) return bad(res, 'Enter a name');
+    if (role === 'driver' && plate.length < 4) return bad(res, 'Drivers need a number plate');
+    if (pin && !/^\d{4}$/.test(pin)) return bad(res, 'A PIN must be 4 digits');
+    if (!pin) pin = randomPin();
+    try {
+        const { data: exists } = await supabase.from('users').select('id').eq('id', id).maybeSingle();
+        if (exists) return res.status(409).json({ success: false, error: 'That ID is already used' });
+        if (ownerId) {
+            const { data: o } = await supabase.from('users').select('id').eq('id', ownerId).eq('role', 'owner').maybeSingle();
+            if (!o) return bad(res, 'Owner ID not found');
+        }
+        const { error } = await supabase.from('users').insert([{
+            id, hashed_pin: await hashPin(pin), role, full_name: name,
+            plate: role === 'driver' ? plate : null, owner_id: role === 'driver' ? ownerId : null
+        }]);
+        if (error) throw error;
+        if (role === 'driver') {
+            const { error: we } = await supabase.from('wallets').insert([{ user_id: id, balance: 0 }]);
+            if (we) { await supabase.from('users').delete().eq('id', id); throw we; }
+        }
+        res.json({ success: true, id, role, name, pin });
+    } catch (err) { fail(res, err); }
+});
+
+// Give someone a new PIN (shown to you once)
+app.post('/api/admin/reset-pin', adminOnly, async (req, res) => {
+    const id = String(req.body.id || '').trim().toUpperCase();
+    try {
+        const pin = randomPin();
+        const { data, error } = await supabase.from('users').update({ hashed_pin: await hashPin(pin) }).eq('id', id).select('id');
+        if (error) throw error;
+        if (!data || !data.length) return res.status(404).json({ success: false, error: 'ID not found' });
+        fails.delete('login|' + id);
+        res.json({ success: true, id, pin });
+    } catch (err) { fail(res, err); }
+});
+
+// Make a batch of one-time top-up codes for a seller
+app.post('/api/admin/codes', adminOnly, async (req, res) => {
+    const amount = Number(req.body.amount), qty = Math.floor(Number(req.body.count));
+    const seller = String(req.body.seller || '').trim().slice(0, 60);
+    const reference = String(req.body.reference || '').trim().slice(0, 60) || null;
+    if (!(amount >= 5 && amount <= 1000)) return bad(res, 'Amount must be between R5 and R1,000');
+    if (!(qty >= 1 && qty <= 50)) return bad(res, 'Make between 1 and 50 codes at a time');
+    if (!seller) return bad(res, 'Enter the seller\'s name');
+    try {
+        const { data: batch, error } = await supabase.from('topup_batches').insert([{ seller, reference, amount, quantity: qty }]).select().single();
+        if (error) throw error;
+        const codes = Array.from({ length: qty }, () => crypto.randomBytes(6).toString('hex').toUpperCase());
+        const { error: te } = await supabase.from('topup_tokens').insert(codes.map((code) => ({ code, amount, batch_id: batch.id })));
+        if (te) { await supabase.from('topup_batches').delete().eq('id', batch.id); throw te; }
+        res.json({ success: true, batch, codes });
+    } catch (err) { fail(res, err); }
+});
+
+// The last batches, with which codes are used
+app.get('/api/admin/batches', adminOnly, async (req, res) => {
+    try {
+        const { data: batches, error } = await supabase.from('topup_batches').select('*').order('created_at', { ascending: false }).limit(15);
+        if (error) throw error;
+        const ids = batches.map((b) => b.id);
+        const { data: tokens } = ids.length ? await supabase.from('topup_tokens').select('code, amount, batch_id, used_by, used_at').in('batch_id', ids) : { data: [] };
+        res.json({ success: true, batches: batches.map((b) => ({ ...b, codes: (tokens || []).filter((t) => t.batch_id === b.id) })) });
+    } catch (err) { fail(res, err); }
+});
+
+// Credit a wallet after you have seen the money in your bank account
+app.post('/api/admin/payments', adminOnly, async (req, res) => {
+    const userId = String(req.body.userId || '').trim().toUpperCase();
+    const amount = Number(req.body.amount);
+    const method = req.body.method;
+    const reference = String(req.body.reference || '').trim().slice(0, 40) || null;
+    if (!['PayShap', 'EFT', 'eWallet', 'Cash'].includes(method)) return bad(res, 'Choose how they paid');
+    if (!(amount >= 1 && amount <= 5000)) return bad(res, 'Amount must be between R1 and R5,000');
+    if (method !== 'Cash' && (!reference || reference.length < 3)) return bad(res, 'Enter the bank reference so the same payment cannot be added twice');
+    try {
+        const { data: u } = await supabase.from('users').select('id').eq('id', userId).eq('role', 'driver').maybeSingle();
+        if (!u) return bad(res, 'Driver ID not found');
+        const { data: pay, error } = await supabase.from('wallet_payments').insert([{ user_id: userId, amount, method, reference }]).select().single();
+        if (error) {
+            if (error.code === '23505') return res.status(409).json({ success: false, error: 'That reference was already used' });
+            throw error;
+        }
+        const c = await creditWallet(userId, amount);
+        if (c.error) { await supabase.from('wallet_payments').delete().eq('id', pay.id); return res.status(c.status).json({ success: false, error: c.error }); }
+        res.json({ success: true, balance: c.balance });
+    } catch (err) { fail(res, err); }
+});
+
+app.get('/api/admin/payments', adminOnly, async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('wallet_payments').select('*').order('created_at', { ascending: false }).limit(25);
+        if (error) throw error;
+        res.json({ success: true, payments: data });
+    } catch (err) { fail(res, err); }
+});
+
+/* ---------- Owner dashboard: trips each driver accepted ---------- */
+const SAST_MS = 2 * 3600 * 1000; // South Africa is UTC+2 all year
+const dayKey = (d) => new Date(new Date(d).getTime() + SAST_MS).toISOString().slice(0, 10);
+
+app.get('/api/owner/summary', auth('owner'), async (req, res) => {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : dayKey(Date.now());
+    const start = new Date(date + 'T00:00:00+02:00');
+    if (isNaN(start)) return bad(res, 'Bad date');
+    const end = new Date(start.getTime() + 86400000), from7 = new Date(start.getTime() - 6 * 86400000);
+    try {
+        const { data: drivers, error } = await supabase.from('users').select('id, full_name, plate')
+            .eq('owner_id', req.user.id).eq('role', 'driver').order('full_name');
+        if (error) throw error;
+        let rows = [];
+        if (drivers.length) {
+            const { data, error: de } = await supabase.from('dispatches').select('driver_id, route, fee, created_at')
+                .in('driver_id', drivers.map((d) => d.id)).gte('created_at', from7.toISOString()).lt('created_at', end.toISOString())
+                .order('created_at', { ascending: true });
+            if (de) throw de;
+            rows = data || [];
+        }
+        const out = drivers.map((d) => {
+            const mine = rows.filter((r) => r.driver_id === d.id), today = mine.filter((r) => new Date(r.created_at) >= start), week = {};
+            mine.forEach((r) => { const k = dayKey(r.created_at); week[k] = (week[k] || 0) + 1; });
+            return { id: d.id, name: d.full_name, plate: d.plate, trips: today.length,
+                fees: today.reduce((s, r) => s + Number(r.fee), 0),
+                list: today.map((r) => ({ time: r.created_at, route: r.route })), week };
+        });
+        res.json({ success: true, date, drivers: out, total: out.reduce((s, d) => s + d.trips, 0) });
     } catch (err) { fail(res, err); }
 });
 
