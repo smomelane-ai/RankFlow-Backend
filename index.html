@@ -95,7 +95,7 @@ h2{margin:16px 0 8px;font-size:1.3rem}
 <div id="alertBox" role="alertdialog" aria-modal="true">
  <p class="lbl" style="color:#d1fae5">DISPATCH ALERT</p>
  <p id="alertPlate" style="font-size:1.4rem;font-weight:900;margin:0"></p>
- <p id="alertSecs">30s</p>
+ <p id="alertSecs">2:00</p>
  <p class="mute" style="color:#d1fae5">A R2.00 rank fee is taken from your wallet when you accept.</p>
  <div style="display:grid;gap:12px;width:100%;max-width:320px">
   <button class="btn wide" style="background:#fff;color:#065f46;font-size:1.3rem" data-a="accept">ACCEPT TRIP</button>
@@ -162,8 +162,9 @@ function managerView() {
     if (S.addOpen) h += '<div class="card" style="margin:10px 0"><b>Add taxi to queue</b><input class="field" id="np" placeholder="Number plate, e.g. ND 123-456" autocapitalize="characters"><input class="field" id="nd" placeholder="Driver name (optional)"><div class="row"><button class="btn sm" data-a="addCancel">Cancel</button><button class="btn g sm" data-a="addOk">Add to queue</button></div></div>';
     if (!S.queue.length) h += '<p class="mute">No taxis waiting on this route.</p>';
     h += '<div class="grid">' + S.queue.map((e, i) =>
-        '<article class="q' + (e === head ? ' head' : '') + '"><div class="num">' + (i + 1) + '</div><div class="info"><div class="plate">' + esc(e.plate) + '</div><div class="mute">' + esc(e.driver_name) + '</div><span class="tag ' + e.status.replace(' ', '') + '">' + e.status + (e.status === 'Offered' ? ' · ' + e.secondsLeft + 's' : '') + '</span></div>' +
+        '<article class="q' + (e === head ? ' head' : '') + '"><div class="num">' + (i + 1) + '</div><div class="info"><div class="plate">' + esc(e.plate) + '</div><div class="mute">' + esc(e.driver_name) + '</div><span class="tag ' + e.status.replace(' ', '') + '">' + e.status + (e.status === 'Offered' ? ' · ' + mmss(e.secondsLeft) : '') + '</span></div>' +
         (e === head ? '<button class="btn g" data-a="dispatchNext"' + (offered || S.busy ? ' disabled' : '') + '>Dispatch Next</button>' : '') +
+        (e.status === 'Offered' ? '<button class="btn r sm" data-a="skip" data-v="' + e.id + '">Skip</button>' : '') +
         (e.status !== 'Offered' ? '<button class="btn a sm" data-a="brk" data-v="' + e.id + '">' + (e.status === 'Break' ? 'Back in queue' : 'Break') + '</button><button class="btn sm" data-a="remove" data-v="' + e.id + '">Remove</button>' : '') + '</article>').join('') + '</div>';
     if (S.recent.length) h += '<h2>Dispatched</h2><div class="grid">' + S.recent.map((e) => '<article class="q"><div class="info"><div class="plate">' + esc(e.plate) + '</div><div class="mute">' + esc(e.driver_name) + '</div><span class="tag Dispatched">Dispatched</span></div><button class="btn sm" data-a="rejoin" data-v="' + e.id + '">Rejoin queue</button></article>').join('') + '</div>';
     return h + '<button class="btn g fab" data-a="addOpen">+ Add Taxi</button>';
@@ -266,9 +267,10 @@ function handleOffer() {
         $('alertBox').className = 'on'; tickAlert();
     } else { S.offerEnd = 0; $('alertBox').className = ''; }
 }
+const mmss = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 function tickAlert() {
     const s = Math.max(0, Math.ceil((S.offerEnd - Date.now()) / 1000));
-    $('alertSecs').textContent = s + 's'; $('alertSecs').className = s <= 10 ? 'low' : '';
+    $('alertSecs').textContent = mmss(s); $('alertSecs').className = s <= 20 ? 'low' : '';
     if (s <= 0 && S.offerEnd) { S.offerEnd = 0; $('alertBox').className = ''; fetchQueue(); }
 }
 setInterval(() => { if (S.offerEnd) tickAlert(); }, 250);
@@ -321,6 +323,7 @@ const A = {
     addOpen() { S.addOpen = true; render(); }, addCancel() { S.addOpen = false; render(); },
     async addOk() { const plate = $('np').value.trim(); if (plate.length < 4) { toast('Enter the number plate'); return; } S.addOpen = false; await act('/api/queue/join', { route: S.route, plate, driverName: $('nd').value.trim() }); },
     brk(v) { act('/api/queue/break', { id: Number(v) }); },
+    skip(v) { act('/api/queue/skip', { id: Number(v) }, 'Offer cancelled. Taxi moved to the back.'); },
     remove(v) { act('/api/queue/remove', { id: Number(v) }); },
     rejoin(v) { act('/api/queue/rejoin', { id: Number(v) }); },
     checkin() { act('/api/queue/join', { route: S.droute }, 'You are in the queue'); },

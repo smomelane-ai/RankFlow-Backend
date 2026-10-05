@@ -16,7 +16,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 const DISPATCH_FEE = 2.0;
 const MAX_TRIES = 5; // wrong PINs or codes allowed per person in 15 minutes
 const LOCK_MS = 15 * 60 * 1000;
-const OFFER_SECONDS = 30; // how long a driver has to accept a dispatch
+const OFFER_SECONDS = 120; // how long a driver has to accept a dispatch (2 minutes)
 const TOKEN_HOURS = 12; // how long a login lasts
 const ROUTES = ['Durban to Inanda', 'Durban to KwaMashu', 'Umlazi to CBD', 'Pinetown to KwaMashu'];
 const ACTIVE = ['In Queue', 'Offered', 'Break'];
@@ -283,6 +283,17 @@ app.post('/api/queue/reject', auth('driver'), async (req, res) => {
         const { error } = await supabase.from('queue_entries')
             .update({ status: 'In Queue', joined_at: new Date().toISOString(), offered_at: null })
             .eq('driver_id', req.user.id).eq('status', 'Offered');
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (err) { fail(res, err); }
+});
+
+// Manager: cancel an offer early. The taxi goes to the back of the queue.
+app.post('/api/queue/skip', auth('manager'), async (req, res) => {
+    try {
+        const { error } = await supabase.from('queue_entries')
+            .update({ status: 'In Queue', joined_at: new Date().toISOString(), offered_at: null })
+            .eq('id', req.body.id).eq('status', 'Offered');
         if (error) throw error;
         res.json({ success: true });
     } catch (err) { fail(res, err); }
